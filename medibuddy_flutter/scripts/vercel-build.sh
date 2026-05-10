@@ -9,8 +9,17 @@
 set -euo pipefail
 export GIT_TERMINAL_PROMPT=0
 
-if [[ -z "${SUPABASE_URL:-}" ]] || [[ -z "${SUPABASE_ANON_KEY:-}" ]] || [[ -z "${API_BASE_URL:-}" ]]; then
-  echo "Missing required env vars. Set SUPABASE_URL, SUPABASE_ANON_KEY, API_BASE_URL in Vercel."
+echo "Vercel env: VERCEL_ENV=${VERCEL_ENV:-<unset>}"
+
+missing=()
+[[ -z "${SUPABASE_URL:-}" ]] && missing+=("SUPABASE_URL")
+[[ -z "${SUPABASE_ANON_KEY:-}" ]] && missing+=("SUPABASE_ANON_KEY")
+[[ -z "${API_BASE_URL:-}" ]] && missing+=("API_BASE_URL")
+
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "Missing required environment variables: ${missing[*]}"
+  echo "Add them in Vercel → Project → Settings → Environment Variables."
+  echo "Enable each for the same target as this deploy (Production *and* Preview if you use both), then Redeploy."
   exit 1
 fi
 

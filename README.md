@@ -110,6 +110,8 @@ The Flutter web artifact must come from **`flutter build web`** (output: `build/
    - `SUPABASE_ANON_KEY` — Supabase anon (public) key
    - `API_BASE_URL` — HTTPS API URL, e.g. `https://your-service.up.railway.app` (no trailing slash)
 
+   **Important:** In Vercel, each variable must be enabled for every environment you deploy to. If you only tick **Production**, builds for **Preview** (e.g. Git PRs or first import) will fail with “Missing required environment variables”. Either add the same three keys for **Preview** (and **Development** if you run `vercel dev`) or deploy from the **production** branch only. After saving variables, trigger a **Redeploy**.
+
 3. SPA routing: [`medibuddy_flutter/vercel.json`](medibuddy_flutter/vercel.json) rewrites deep links to `index.html`.
 
 4. **Supabase Auth** URLs: add your Vercel origin(s), e.g. `https://<project>.vercel.app`, under **Redirect URLs** / **Site URL** as needed.
