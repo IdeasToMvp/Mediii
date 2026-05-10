@@ -80,7 +80,7 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MediBuddy'),
+        title: const Text('MediSathi'),
         actions: [
           IconButton(onPressed: _reload, tooltip: 'Refresh', icon: const Icon(Icons.refresh)),
           PopupMenuButton<String>(

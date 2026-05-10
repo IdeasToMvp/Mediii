@@ -316,7 +316,7 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                     )
                   : const Icon(Icons.save_outlined),
-              label: Text(_saving ? 'Saving…' : 'Save to MediBuddy'),
+              label: Text(_saving ? 'Saving…' : 'Save to MediSathi'),
             ),
           ],
         ],

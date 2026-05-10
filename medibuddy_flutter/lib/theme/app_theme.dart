@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
+import 'medisathi_colors.dart';
+
 class AppTheme {
   AppTheme._();
 
   static ThemeData mobileFirst() {
-    const primary = Color(0xFF0D9488); // teal-600
+    final scheme = ColorScheme.fromSeed(seedColor: MediSathiColors.brandBlue, brightness: Brightness.light);
     return ThemeData(
       useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(seedColor: primary, brightness: Brightness.light),
+      colorScheme: scheme,
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,

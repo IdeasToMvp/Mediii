@@ -5,9 +5,9 @@ void main() {
   testWidgets('smoke: basic widget tree', (WidgetTester tester) async {
     await tester.pumpWidget(
       const MaterialApp(
-        home: Scaffold(body: Text('MediBuddy smoke')),
+        home: Scaffold(body: Text('MediSathi smoke')),
       ),
     );
-    expect(find.text('MediBuddy smoke'), findsOneWidget);
+    expect(find.text('MediSathi smoke'), findsOneWidget);
   });
 }

@@ -1,11 +1,11 @@
 {
-    "name": "MediBuddy",
-    "short_name": "MediBuddy",
+    "name": "MediSathi",
+    "short_name": "MediSathi",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0D9488",
-    "theme_color": "#0D9488",
-    "description": "MediBuddy — prescriptions organizer with optional AI extraction.",
+    "background_color": "#2563EB",
+    "theme_color": "#2563EB",
+    "description": "MediSathi — secure health records and prescriptions.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
