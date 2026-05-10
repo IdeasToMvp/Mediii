@@ -1,0 +1,17 @@
+# MediBuddy API — Railway Config as Code
+#
+# Monorepo: set the service Root Directory to `backend` so install/start run here.
+# Also set Railway → Settings → Config as Code → file path:
+#   /backend/railway.toml
+# (Config-as-code paths are repo-root-relative; they ignore Root Directory.)
+# Build system: https://docs.railway.com/builds/build-configuration
+
+[build]
+builder = "RAILPACK"
+watchPatterns = ["/backend/**"]
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"

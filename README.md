@@ -49,6 +49,17 @@ The API verifies the caller by treating the `Authorization: Bearer` value as a S
 OPENAI_VISION_MODEL=gpt-4o
 ```
 
+### Railway (API hosting)
+
+The API lives under `backend/` (monorepo). Railway build behavior is described in the [build configuration docs](https://docs.railway.com/builds/build-configuration).
+
+1. Link the GitHub repo and create a service for the API.
+2. Set **Root Directory** to `backend` so install/start run in that folder.
+3. Under **Config as Code**, set the file path to **`/backend/railway.toml`**. Config-as-code paths are **repo-root-relative**; they do **not** follow Root Directory (see the same docs page).
+4. Set service **Variables**: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `OPENAI_API_KEY` (and optionally `OPENAI_VISION_MODEL`). `PORT` is assigned by Railway.
+
+`backend/railway.toml` pins the **RAILPACK** builder, `watchPatterns` for `/backend/**`, `npm start`, and a deploy health check on `/api/health`.
+
 ---
 
 ## 3) Flutter app
