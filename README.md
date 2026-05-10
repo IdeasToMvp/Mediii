@@ -51,14 +51,14 @@ OPENAI_VISION_MODEL=gpt-4o
 
 ### Railway (API hosting)
 
-The API lives under `backend/` (monorepo). Railway build behavior is described in the [build configuration docs](https://docs.railway.com/builds/build-configuration).
+Monorepo: there is **no** root `package.json`, so [Railpack](https://docs.railway.com/builds/build-configuration) at the repo root cannot auto-detect Node. This repo uses a **`Dockerfile`** under `backend/` instead (see [`railway.toml`](railway.toml) at the repo root).
 
 1. Link the GitHub repo and create a service for the API.
-2. Set **Root Directory** to `backend` so install/start run in that folder.
-3. Under **Config as Code**, set the file path to **`/backend/railway.toml`**. Config-as-code paths are **repo-root-relative**; they do **not** follow Root Directory (see the same docs page).
-4. Set service **Variables**: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `OPENAI_API_KEY` (and optionally `OPENAI_VISION_MODEL`). `PORT` is assigned by Railway.
+2. **Root Directory**: leave **`/` empty** (default). The Dockerfile is referenced as `backend/Dockerfile` from the **full checkout**.
+3. **Config as Code** path: **`/railway.toml`** (still repo-root-relative; it does **not** follow Root Directory — same docs link above).
+4. **Variables**: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `OPENAI_API_KEY` (optional: `OPENAI_VISION_MODEL`). Railway sets **`PORT`**; the server reads `process.env.PORT`.
 
-`backend/railway.toml` pins the **RAILPACK** builder, `watchPatterns` for `/backend/**`, `npm start`, and a deploy health check on `/api/health`.
+Alternative (Railpack only): set **Root Directory** to `backend` and keep the config manifest beside `backend/package.json`. The Dockerfile route avoids Railpack guessing wrong when manifests live only at `/railway.toml`.
 
 ---
 
