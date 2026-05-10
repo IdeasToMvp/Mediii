@@ -94,6 +94,35 @@ flutter run -d chrome \
   --dart-define=API_BASE_URL=http://localhost:3200
 ```
 
+### Vercel (Flutter Web)
+
+The Flutter web artifact must come from **`flutter build web`** (output: `build/web`). Do **not** set Root Directory to `medibuddy_flutter/web` (sources only).
+
+1. **Vercel** → Project → Settings → General / Build & Deploy:
+   - **Root Directory:** `medibuddy_flutter`
+   - **Framework Preset:** Other (optional; avoids wrong auto-detect).
+   - **Build Command:** (optional if you use repo `vercel.json`) defaults to script below.
+   - **Output Directory:** `build/web` (must match `vercel.json` if present).
+   - **Install Command:** can be noop / skip for Flutter-only root (handled in `medibuddy_flutter/vercel.json`).
+
+2. **Environment variables** (required at **build** time — `--dart-define` is baked into the wasm/js bundle):
+   - `SUPABASE_URL` — Supabase project URL
+   - `SUPABASE_ANON_KEY` — Supabase anon (public) key
+   - `API_BASE_URL` — HTTPS API URL, e.g. `https://your-service.up.railway.app` (no trailing slash)
+
+3. SPA routing: [`medibuddy_flutter/vercel.json`](medibuddy_flutter/vercel.json) rewrites deep links to `index.html`.
+
+4. **Supabase Auth** URLs: add your Vercel origin(s), e.g. `https://<project>.vercel.app`, under **Redirect URLs** / **Site URL** as needed.
+
+5. Local dry run from `medibuddy_flutter`:
+
+   ```bash
+   export SUPABASE_URL=...
+   export SUPABASE_ANON_KEY=...
+   export API_BASE_URL=https://your-api.example.com
+   bash scripts/vercel-build.sh
+   ```
+
 **CORS:** the backend enables `cors()` broadly for local dev; tighten `origin` before production.
 
 ---
