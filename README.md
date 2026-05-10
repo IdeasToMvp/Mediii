@@ -1,0 +1,216 @@
+# MediBuddy
+
+Cross-platform app (**Flutter**: iOS, Android, Web) with a small **Node.js** API and **Supabase** for Google sign-in and Postgres storage. Prescriptions can be entered manually or extracted from a photo via **OpenAI** (vision).
+
+---
+
+## Repository layout
+
+| Path | Purpose |
+|------|---------|
+| `medibuddy_flutter/` | Flutter app (targets iOS, Android, Web) |
+| `backend/` | Express API (`/api/health`, prescriptions + OpenAI analyze) |
+| `supabase/migrations/001_prescriptions.sql` | Run in Supabase SQL editor to create `prescriptions` + RLS |
+
+---
+
+## 1) Supabase setup
+
+1. Create a project at [https://supabase.com](https://supabase.com).
+2. **SQL**: run `supabase/migrations/001_prescriptions.sql` in the SQL editor.
+3. **Auth → Providers → Google**: enable Google; add your OAuth client IDs from Google Cloud Console (Web / iOS / Android as needed).
+4. **Auth → URL configuration**:
+   - Add **Redirect URLs** including:
+     - `io.medibuddy.app://login-callback/` (iOS / Android deep link used by this project)
+     - Your Flutter web origin(s), e.g. `http://localhost:XXXX/` and your production web URL.
+   - Set **Site URL** to your primary app URL (for web, often `http://localhost:PORT` during dev).
+
+Copy **Project URL** and **anon public key** from **Project Settings → API** (used by Flutter and the backend).
+
+---
+
+## 2) Backend (Node)
+
+```bash
+cd backend
+cp .env.example .env
+# Edit .env: OPENAI_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY
+npm install
+npm run dev
+```
+
+Default listen: `http://localhost:3200`
+
+The API verifies the caller by treating the `Authorization: Bearer` value as a Supabase **access token** (`getUser()`).
+
+**Optional:** override vision model (default `gpt-4o-mini`):
+
+```bash
+OPENAI_VISION_MODEL=gpt-4o
+```
+
+---
+
+## 3) Flutter app
+
+The app reads config from **compile-time** `--dart-define` flags (avoids committing secrets).
+
+### iOS Simulator / macOS / desktop (API on same machine)
+
+```bash
+cd medibuddy_flutter
+flutter run \
+  --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=YOUR_ANON_JWT \
+  --dart-define=API_BASE_URL=http://127.0.0.1:3200
+```
+
+### Android Emulator (host API)
+
+```bash
+flutter run \
+  --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=YOUR_ANON_JWT \
+  --dart-define=API_BASE_URL=http://10.0.2.2:3200
+```
+
+### Web (Chrome)
+
+```bash
+flutter run -d chrome \
+  --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=YOUR_ANON_JWT \
+  --dart-define=API_BASE_URL=http://localhost:3200
+```
+
+**CORS:** the backend enables `cors()` broadly for local dev; tighten `origin` before production.
+
+---
+
+## 4) Getting a Supabase `access_token` for manual API testing
+
+Use the Supabase REST auth endpoint (email/password is **not** configured in this starter—use **Google** in the app first, or use the Supabase Dashboard “Generate link” / client session from your dev tools).
+
+Practical approach after signing in inside the app: copy the **access token** from Supabase session debug output or from your browser’s local storage for Flutter web (look for keys under your Supabase URL / `sb-` keys). Use that string as `ACCESS_TOKEN` below.
+
+---
+
+## 5) HTTP API — `curl` examples
+
+Replace:
+
+- `ACCESS_TOKEN` — Supabase JWT access token for your signed-in user  
+- `BASE` — `http://localhost:3200` (or your deployed API base)  
+- `./rx.jpg` — path to a JPEG/PNG prescription image  
+
+### Health check (no auth)
+
+```bash
+curl -sS "$BASE/api/health"
+```
+
+Example:
+
+```bash
+curl -sS "http://localhost:3200/api/health"
+```
+
+### List prescriptions (auth required)
+
+```bash
+curl -sS "$BASE/api/prescriptions" \
+  -H "Authorization: Bearer ACCESS_TOKEN"
+```
+
+### Create manual prescription (JSON)
+
+```bash
+curl -sS "$BASE/api/prescriptions" \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "manual",
+    "title": "Clinic visit",
+    "patient_name": "Alex Example",
+    "doctor_name": "Dr. Rao",
+    "prescription_date": "2026-05-10",
+    "diagnosis": "Hypertension",
+    "general_instructions": "Take after food. Follow up in 2 weeks.",
+    "medications": [
+      {
+        "name": "Amlodipine",
+        "dosage": "5 mg",
+        "frequency": "Once daily",
+        "duration": "30 days",
+        "instructions": "Morning"
+      }
+    ]
+  }'
+```
+
+### Analyze prescription image (multipart, does not save)
+
+```bash
+curl -sS "$BASE/api/prescriptions/analyze-image" \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -F "image=@./rx.jpg;type=image/jpeg"
+```
+
+### Analyze image via JSON + base64 (auth required)
+
+```bash
+B64="$(base64 -i ./rx.jpg)"
+curl -sS "$BASE/api/prescriptions/analyze-image-json" \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"image_base64\":\"$B64\",\"mime_type\":\"image/jpeg\"}"
+```
+
+### Fetch one prescription by id
+
+```bash
+curl -sS "$BASE/api/prescriptions/PRESCRIPTION_UUID" \
+  -H "Authorization: Bearer ACCESS_TOKEN"
+```
+
+### Typical “upload flow”
+
+1. Call `analyze-image` → review JSON `analysis` in the response  
+2. Correct fields client-side, then `POST /api/prescriptions` with `"source": "analyzed"` and `raw_analysis` set to the parsed object (the Flutter app mirrors this)
+
+Example save after analysis:
+
+```bash
+curl -sS "$BASE/api/prescriptions" \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "analyzed",
+    "title": "City Clinic",
+    "patient_name": null,
+    "doctor_name": "Dr. Rao",
+    "prescription_date": "2026-05-10",
+    "diagnosis": null,
+    "general_instructions": null,
+    "extraction_notes": "Handwriting partially unclear",
+    "medications": [
+      {
+        "name": "Amlodipine",
+        "dosage": "5 mg",
+        "frequency": "QD",
+        "duration": null,
+        "instructions": null
+      }
+    ],
+    "raw_analysis": { "note": "store the exact OpenAI-shaped JSON here" }
+  }'
+```
+
+---
+
+## Notes & disclaimer
+
+MediBuddy is a **technical starter**, not medical advice. OCR/LLM extraction can be wrong; users must verify medicines with a licensed clinician or pharmacist before acting on extracted data.
+
+If inserts fail with Row Level Security errors, confirm the migration ran and `Authorization` carries the signed-in **user access token**, not only the anon key alone.
+

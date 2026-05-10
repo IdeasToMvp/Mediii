@@ -1,0 +1,22 @@
+{
+  "name": "medibuddy-api",
+  "version": "1.0.0",
+  "description": "MediBuddy API — prescription analysis (OpenAI) and Supabase storage",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "multer": "^2.0.0",
+    "openai": "^4.80.1"
+  }
+}

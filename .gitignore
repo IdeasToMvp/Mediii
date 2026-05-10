@@ -1,0 +1,24 @@
+# Secrets — copy from *.env.example; never commit real keys
+.env
+backend/.env
+medibuddy_flutter/.env
+
+# Backend
+backend/node_modules/
+
+# Flutter / Dart
+**/build/
+**/doc/api/
+medibuddy_flutter/.dart_tool/
+
+# Xcode / CocoaPods
+**/Pods/
+**/DerivedData/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
