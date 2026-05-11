@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../config/document_upload_limits.dart';
 import '../models/prescription.dart';
 import '../services/medibuddy_api.dart';
+import '../theme/medisathi_colors.dart';
 
 class UploadPrescriptionScreen extends StatefulWidget {
   const UploadPrescriptionScreen({
@@ -29,6 +30,11 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
 
   final List<XFile> _files = [];
   int _cursor = 0;
+
+  /// Decoded JPEG/PNG/WebP preview for [_active]; avoids flaky [FutureBuilder] on web rebuilds.
+  Uint8List? _imagePreviewBytes;
+  bool _imagePreviewLoading = false;
+  String? _imagePreviewError;
 
   bool _analyzing = false;
   bool _saving = false;
@@ -93,35 +99,144 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
     return pdfs == 0 || pdfs == xs.length;
   }
 
+  static String _mimeFromFilename(String name) {
+    final n = name.toLowerCase().trim();
+    if (n.endsWith('.png')) return 'image/png';
+    if (n.endsWith('.webp')) return 'image/webp';
+    if (n.endsWith('.gif')) return 'image/gif';
+    if (n.endsWith('.jpeg') || n.endsWith('.jpg')) return 'image/jpeg';
+    if (n.endsWith('.pdf')) return 'application/pdf';
+    return 'application/octet-stream';
+  }
+
+  /// Prefer in-memory bytes ([withData: true] on web); fall back to path on native.
+  XFile? _platformFileToXFile(PlatformFile pf) {
+    if (pf.bytes != null && pf.bytes!.isNotEmpty) {
+      final name = pf.name.trim().isNotEmpty ? pf.name.trim() : 'upload';
+      return XFile.fromData(pf.bytes!, name: name, mimeType: _mimeFromFilename(name));
+    }
+    final p = pf.path?.trim();
+    if (p != null && p.isNotEmpty) {
+      return XFile(p);
+    }
+    return null;
+  }
+
+  /// Mobile browsers often hand back blob-backed [XFile]s from [ImagePicker] where
+  /// [readAsBytes]/[length] fail or hang. Materialize to in-memory [XFile.fromData].
+  Future<XFile> _materializeIfWeb(XFile f) async {
+    if (!kIsWeb) return f;
+    try {
+      final bytes = await f.readAsBytes();
+      if (bytes.isEmpty) {
+        throw FormatException('Empty file (${f.name})');
+      }
+      final name = f.name.trim().isNotEmpty ? f.name.trim() : 'upload.jpg';
+      final mime = (f.mimeType != null && f.mimeType!.isNotEmpty) ? f.mimeType! : _mimeFromFilename(name);
+      return XFile.fromData(bytes, name: name, mimeType: mime);
+    } catch (e, st) {
+      debugPrint('_materializeIfWeb: $e\n$st');
+      rethrow;
+    }
+  }
+
+  Future<List<XFile>> _materializeListIfWeb(List<XFile> xs) => Future.wait(xs.map(_materializeIfWeb));
+
   Future<void> _setQueue(List<XFile> next) async {
-    for (final f in next) {
-      await _assertFileSize(f);
-    }
-    if (!_homogeneous(next)) {
+    try {
+      final ready = await _materializeListIfWeb(next);
+      for (final f in ready) {
+        await _assertFileSize(f);
+      }
+      if (!_homogeneous(ready)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pick either photos only or PDFs only in one batch — not mixed.')),
+        );
+        return;
+      }
+      if (!_paid && ready.length > 1) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Free plan: one image at a time.')),
+        );
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        _files
+          ..clear()
+          ..addAll(ready);
+        _cursor = 0;
+        _analysis = null;
+        _clearEditors();
+        _imagePreviewBytes = null;
+        _imagePreviewError = null;
+        _imagePreviewLoading = false;
+      });
+      await _reloadImagePreview();
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pick either photos only or PDFs only in one batch — not mixed.')),
+        SnackBar(content: Text(_shortError(e))),
       );
-      return;
     }
-    if (!_paid && next.length > 1) {
+  }
+
+  Future<void> _reloadImagePreview() async {
+    final f = _active;
+    if (f == null || _currentIsPdf) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Free plan: one image at a time.')),
-      );
+      setState(() {
+        _imagePreviewBytes = null;
+        _imagePreviewLoading = false;
+        _imagePreviewError = null;
+      });
       return;
     }
+    if (!mounted) return;
     setState(() {
-      _files
-        ..clear()
-        ..addAll(next);
-      _cursor = 0;
-      _analysis = null;
-      _clearEditors();
+      _imagePreviewLoading = true;
+      _imagePreviewError = null;
+      _imagePreviewBytes = null;
     });
+    try {
+      final b = await f.readAsBytes();
+      if (b.isEmpty) throw const FormatException('Empty image payload');
+      if (!mounted) return;
+      setState(() {
+        _imagePreviewBytes = b;
+        _imagePreviewLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _imagePreviewLoading = false;
+        _imagePreviewBytes = null;
+        _imagePreviewError = _shortError(e);
+      });
+    }
   }
 
   Future<void> _pickFreeGallery() async {
+    if (kIsWeb) {
+      final r = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
+      );
+      if (r == null || r.files.isEmpty) return;
+      final pf = r.files.first;
+      final x = _platformFileToXFile(pf);
+      if (x == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read this image in the browser. Try another file or use Chrome/Safari.')),
+        );
+        return;
+      }
+      await _setQueue([x]);
+      return;
+    }
     final img = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 100);
     if (img == null) return;
     await _setQueue([img]);
@@ -134,6 +249,28 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
   }
 
   Future<void> _pickPaidPhotos() async {
+    if (kIsWeb) {
+      final r = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.image,
+        withData: true,
+      );
+      if (r == null || r.files.isEmpty) return;
+      final out = <XFile>[];
+      for (final pf in r.files) {
+        final x = _platformFileToXFile(pf);
+        if (x != null) out.add(x);
+      }
+      if (out.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read selected images. Try fewer files or another browser.')),
+        );
+        return;
+      }
+      await _setQueue(out);
+      return;
+    }
     final list = await _picker.pickMultiImage(imageQuality: 100);
     if (list.isEmpty) return;
     await _setQueue(list);
@@ -149,13 +286,16 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
     if (r == null || r.files.isEmpty) return;
     final out = <XFile>[];
     for (final pf in r.files) {
-      if (pf.path != null && pf.path!.isNotEmpty) {
-        out.add(XFile(pf.path!));
-      } else if (pf.bytes != null) {
-        out.add(XFile.fromData(pf.bytes!, name: pf.name.isNotEmpty ? pf.name : 'document.pdf'));
-      }
+      final x = _platformFileToXFile(pf);
+      if (x != null) out.add(x);
     }
-    if (out.isEmpty) return;
+    if (out.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not read PDF data. Try again or use another browser.')),
+      );
+      return;
+    }
     await _setQueue(out);
   }
 
@@ -297,13 +437,14 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
     return meta;
   }
 
-  void _advanceOrPopAfterSave() {
+  Future<void> _advanceOrPopAfterSave() async {
     if (_cursor + 1 < _files.length) {
       setState(() {
         _cursor++;
         _analysis = null;
         _clearEditors();
       });
+      await _reloadImagePreview();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Saved. Now review document ${_cursor + 1} of ${_files.length}.')),
@@ -353,7 +494,7 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
         buf.write(' (${pf['mode']})');
       }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(buf.toString())));
-      _advanceOrPopAfterSave();
+      await _advanceOrPopAfterSave();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -463,7 +604,7 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(buf.toString())));
-      _advanceOrPopAfterSave();
+      await _advanceOrPopAfterSave();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -489,33 +630,213 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
     return t.isEmpty ? null : t;
   }
 
+  Widget _buildImagePreviewCard(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final active = _active;
+    if (active == null || _currentIsPdf) return const SizedBox.shrink();
+
+    Widget inner;
+    if (_imagePreviewLoading) {
+      inner = const SizedBox(
+        height: 220,
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2.6)),
+      );
+    } else if (_imagePreviewError != null) {
+      inner = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 6),
+        child: Column(
+          children: [
+            Icon(Icons.broken_image_outlined, size: 42, color: cs.error),
+            const SizedBox(height: 10),
+            Text(
+              _imagePreviewError!,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(height: 1.35),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.tonal(
+              onPressed: () => _reloadImagePreview(),
+              child: const Text('Retry preview'),
+            ),
+          ],
+        ),
+      );
+    } else if (_imagePreviewBytes != null && _imagePreviewBytes!.isNotEmpty) {
+      inner = ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: InteractiveViewer(
+          boundaryMargin: const EdgeInsets.all(24),
+          minScale: 0.75,
+          maxScale: 3.5,
+          child: Image.memory(
+            _imagePreviewBytes!,
+            fit: BoxFit.contain,
+            height: 280,
+            gaplessPlayback: true,
+          ),
+        ),
+      );
+    } else {
+      inner = SizedBox(
+        height: 120,
+        child: Center(
+          child: Text('Loading preview…', style: theme.textTheme.bodySmall?.copyWith(color: cs.outline)),
+        ),
+      );
+    }
+
+    return Card(
+      elevation: 0,
+      color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: MediSathiColors.brandBlue.withValues(alpha: 0.22)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: MediSathiColors.brandBlue.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.document_scanner_outlined, size: 20, color: MediSathiColors.brandBlue),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Your document',
+                    style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            inner,
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final mq = MediaQuery.of(context);
+    final bottomPad = 24.0 + mq.padding.bottom + mq.viewInsets.bottom;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Add prescription or report')),
+      resizeToAvoidBottomInset: true,
+      appBar: AppBar(
+        title: const Text('Add prescription or report'),
+        actions: [
+          if (_paid)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Align(
+                alignment: Alignment.center,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0369A1).withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    'PRO',
+                    style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: 0.8),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
+        padding: EdgeInsets.fromLTRB(16, 10, 16, bottomPad),
         children: [
-          Text(
-            DocumentUploadLimits.summaryLine(paid: _paid),
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.35),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              gradient: LinearGradient(
+                colors: [
+                  MediSathiColors.brandBlue.withValues(alpha: 0.09),
+                  cs.surfaceContainerHighest.withValues(alpha: 0.5),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              border: Border.all(color: MediSathiColors.brandBlue.withValues(alpha: 0.16)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    DocumentUploadLimits.summaryLine(paid: _paid),
+                    style: theme.textTheme.bodyMedium?.copyWith(height: 1.4, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Max ${DocumentUploadLimits.humanMaxSize()} per file — originals are kept exactly as uploaded.',
+                    style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.35),
+                  ),
+                ],
+              ),
+            ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 18),
           Text(
-            'Max ${DocumentUploadLimits.humanMaxSize()} per file — files are stored exactly as uploaded.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
+            'Choose files',
+            style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 4),
+          Text(
+            'Pick a sharp photo — better lighting improves AI accuracy.',
+            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
           if (_files.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                'Document ${_files.isEmpty ? 0 : _cursor + 1} of ${_files.length}: ${_active?.name ?? '—'}',
-                style: Theme.of(context).textTheme.labelLarge,
+              padding: const EdgeInsets.only(bottom: 10),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(
+                    children: [
+                      Icon(Icons.insert_drive_file_outlined, size: 20, color: cs.primary),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Doc ${_cursor + 1}/${_files.length}: ${_active?.name ?? '—'}',
+                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           if (_paid) ...[
             FilledButton.tonalIcon(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
               onPressed: _showPaidPickerSheet,
               icon: const Icon(Icons.add_photo_alternate_outlined),
               label: const Text('Choose files (Pro)'),
@@ -525,6 +846,10 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(50),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
                     onPressed: _pickPaidCamera,
                     icon: const Icon(Icons.photo_camera_outlined),
                     label: const Text('Camera'),
@@ -537,6 +862,10 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(50),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
                     onPressed: _pickFreeCamera,
                     icon: const Icon(Icons.photo_camera_outlined),
                     label: const Text('Camera'),
@@ -544,7 +873,11 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: OutlinedButton.icon(
+                  child: FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(50),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
                     onPressed: _pickFreeGallery,
                     icon: const Icon(Icons.photo_library_outlined),
                     label: const Text('Gallery'),
@@ -553,24 +886,17 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
               ],
             ),
           ],
-          const SizedBox(height: 12),
-          if (_active != null && !_currentIsPdf) ...[
-            FutureBuilder<Uint8List>(
-              future: _active!.readAsBytes(),
-              builder: (context, snap) {
-                if (!snap.hasData) {
-                  return const SizedBox(height: 160, child: Center(child: CircularProgressIndicator()));
-                }
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.memory(snap.data!, fit: BoxFit.contain, height: 220),
-                );
-              },
-            ),
-            const SizedBox(height: 12),
-          ],
+          const SizedBox(height: 14),
+          _buildImagePreviewCard(context),
+          if (_active != null && !_currentIsPdf) const SizedBox(height: 14),
           if (_currentIsPdf) ...[
             Card(
+              elevation: 0,
+              color: Colors.red.shade50.withValues(alpha: 0.65),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: Colors.red.shade100),
+              ),
               child: ListTile(
                 leading: Icon(Icons.picture_as_pdf_rounded, color: Colors.red.shade700, size: 36),
                 title: const Text('PDF selected'),
@@ -581,6 +907,12 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
           ],
           if (_active != null && !_currentIsPdf)
             FilledButton.icon(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+                backgroundColor: MediSathiColors.brandBlue,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
               onPressed: (_analyzing || _saving) ? null : _analyze,
               icon: _analyzing
                   ? const SizedBox(
