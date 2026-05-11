@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -29,7 +30,8 @@ class _AppBootstrapState extends State<AppBootstrap> {
     if (_signedIn) {
       return;
     }
-    _showSplash = true;
+    // Web: skip timed splash — go straight into landing / onboarding funnel.
+    _showSplash = !kIsWeb;
     _loadOnboardingFlag();
   }
 

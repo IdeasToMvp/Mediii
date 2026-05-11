@@ -17,7 +17,7 @@ Cross-platform app (**Flutter**: iOS, Android, Web) with a small **Node.js** API
 ## 1) Supabase setup
 
 1. Create a project at [https://supabase.com](https://supabase.com).
-2. **SQL**: run `supabase/migrations/001_prescriptions.sql` in the SQL editor.
+2. **SQL**: run migrations in `supabase/migrations/` in order (`001` onward). For app releases apply at least **`011`**–**`014`** (platform column).
 3. **Auth → Providers → Google**: enable Google; add your OAuth client IDs from Google Cloud Console (Web / iOS / Android as needed).
 4. **Auth → URL configuration**:
    - Add **Redirect URLs** including:
@@ -42,6 +42,37 @@ npm run dev
 Default listen: `http://localhost:3200`
 
 The API verifies the caller by treating the `Authorization: Bearer` value as a Supabase **access token** (`getUser()`).
+
+### Android / iOS artifacts (Postman)
+
+1. Apply migrations **`011_app_releases`** (table + bucket), **`012`** (bucket limit), **`013`** (`apk_download_url`), **`014`** (`platform` column — `android` \| `ios`).
+2. Set **`SUPABASE_SERVICE_ROLE_KEY`** and **`APK_ADMIN_UPLOAD_TOKEN`** on the server (`backend/.env.example`).
+
+**Option A — multipart upload to Storage:** `POST /api/admin/app-releases` (`multipart/form-data`), header **`X-Admin-Upload-Token`**. Fields: **`apk`** (file — `.apk` when `platform` is `android`, `.ipa` when `ios`), **`version`**, **`version_code`**, optional **`release_notes`**, **`channel`**, **`platform`** or **`build_type`** (`android` \| `ios`, default `android`).
+
+**Option B — hosted HTTPS link (JSON):** `POST /api/admin/app-releases/link` with `Content-Type: application/json`, same header. Body includes **`download_url`**, **`version`**, **`version_code`**, optional **`platform`** / **`build_type`**, **`release_notes`**, **`channel`**, **`apk_filename`**, **`apk_byte_size`**.
+
+Example (Android + Drive link):
+
+```bash
+curl -X POST "$API/api/admin/app-releases/link" \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Upload-Token: $TOKEN" \
+  -d '{"download_url":"https://drive.google.com/file/d/FILE_ID/view","version":"1.2.0","version_code":20,"platform":"android","release_notes":"Bug fixes"}'
+```
+
+iOS link (structure ready for TestFlight / hosted IPA):
+
+```bash
+curl -X POST "$API/api/admin/app-releases/link" \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Upload-Token: $TOKEN" \
+  -d '{"download_url":"https://…","version":"1.2.0","version_code":20,"build_type":"ios","apk_filename":"MediSathi.ipa"}'
+```
+
+**Public:** `GET /api/app-releases/latest?channel=production&platform=android` (or `platform=ios`). **`GET /api/app-releases/:id/download-url`** returns a signed Storage URL or the stored HTTPS link.
+
+Optional env: **`APK_DOWNLOAD_URL_TTL_SEC`** for **Storage-backed** signed URLs only.
 
 **Optional:** override vision model (default `gpt-4o-mini`):
 

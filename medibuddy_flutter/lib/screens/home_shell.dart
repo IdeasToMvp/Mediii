@@ -14,6 +14,7 @@ import 'medicine_reminders_tab.dart';
 import 'add_prescription_manual_screen.dart';
 import 'dashboard_home_screen.dart';
 import 'edit_profile_screen.dart';
+import 'landing_screen.dart';
 import 'login_screen.dart';
 import 'profile_tab.dart';
 import 'upload_prescription_screen.dart';
@@ -27,7 +28,7 @@ class HomeShell extends StatelessWidget {
       stream: Supabase.instance.client.auth.onAuthStateChange,
       builder: (context, snapshot) {
         final session = Supabase.instance.client.auth.currentSession;
-        if (session == null) return const LoginScreen();
+        if (session == null) return kIsWeb ? const WelcomeWebFlow() : const LoginScreen();
         return const _HomeAuthenticated();
       },
     );

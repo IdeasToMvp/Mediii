@@ -83,6 +83,11 @@ class _MediBuddyAppState extends State<MediBuddyApp> {
 
   @override
   Widget build(BuildContext context) {
+    final appRoot = AppThemeScope(
+      darkMode: _themeMode == ThemeMode.dark,
+      onDarkModeChanged: _setDarkMode,
+      child: const AppBootstrap(),
+    );
     return MaterialApp(
       title: 'MediSathi',
       theme: AppTheme.mobileFirst(),
@@ -91,14 +96,8 @@ class _MediBuddyAppState extends State<MediBuddyApp> {
       builder: (context, child) {
         return MediaQuery(data: _nonNegativeViewInsets(MediaQuery.of(context)), child: child ?? const SizedBox.shrink());
       },
-      home: AppTheme.constrainMobileWidth(
-        maxWidth: 640,
-        child: AppThemeScope(
-          darkMode: _themeMode == ThemeMode.dark,
-          onDarkModeChanged: _setDarkMode,
-          child: const AppBootstrap(),
-        ),
-      ),
+      // Web should use the full viewport like a normal site; native apps stay in a phone-width shell.
+      home: kIsWeb ? appRoot : AppTheme.constrainMobileWidth(maxWidth: 640, child: appRoot),
     );
   }
 }
@@ -114,27 +113,46 @@ class _MissingSupabaseConfigApp extends StatelessWidget {
       builder: (context, child) {
         return MediaQuery(data: _nonNegativeViewInsets(MediaQuery.of(context)), child: child ?? const SizedBox.shrink());
       },
-      home: AppTheme.constrainMobileWidth(
-        maxWidth: 640,
-        child: Scaffold(
-          appBar: AppBar(title: const Text('MediSathi')),
-          body: const Padding(
-            padding: EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Missing Supabase configuration'),
-                SizedBox(height: 10),
-                Text(
-                  'Run the app with --dart-define=SUPABASE_URL=... '
-                  '--dart-define=SUPABASE_ANON_KEY=...\n'
-                  '(see README.md in the repo root)',
+      home: kIsWeb
+          ? Scaffold(
+              appBar: AppBar(title: const Text('MediSathi')),
+              body: const Padding(
+                padding: EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Missing Supabase configuration'),
+                    SizedBox(height: 10),
+                    Text(
+                      'Run the app with --dart-define=SUPABASE_URL=... '
+                      '--dart-define=SUPABASE_ANON_KEY=...\n'
+                      '(see README.md in the repo root)',
+                    ),
+                  ],
                 ),
-              ],
+              ),
+            )
+          : AppTheme.constrainMobileWidth(
+              maxWidth: 640,
+              child: Scaffold(
+                appBar: AppBar(title: const Text('MediSathi')),
+                body: const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Missing Supabase configuration'),
+                      SizedBox(height: 10),
+                      Text(
+                        'Run the app with --dart-define=SUPABASE_URL=... '
+                        '--dart-define=SUPABASE_ANON_KEY=...\n'
+                        '(see README.md in the repo root)',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-      ),
     );
   }
 }

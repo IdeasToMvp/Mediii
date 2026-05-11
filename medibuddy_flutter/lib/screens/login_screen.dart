@@ -1,12 +1,18 @@
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/app_config.dart';
 import '../theme/medisathi_colors.dart';
+import '../widgets/android_release_download_panel.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.onBack});
+
+  /// Web landing: navigate back to marketing page.
+  final VoidCallback? onBack;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -14,6 +20,15 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   bool _busy = false;
+
+  bool get _androidNative {
+    if (kIsWeb) return false;
+    try {
+      return Platform.isAndroid;
+    } catch (_) {
+      return false;
+    }
+  }
 
   Future<void> _google() async {
     setState(() => _busy = true);
@@ -49,7 +64,22 @@ class _LoginScreenState extends State<LoginScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
-              child: Container(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (widget.onBack != null) ...[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: widget.onBack,
+                        icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                        label: const Text('About MediSathi'),
+                        style: TextButton.styleFrom(foregroundColor: MediSathiColors.brandBlue),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  Container(
                 padding: const EdgeInsets.fromLTRB(24, 36, 24, 28),
                 decoration: BoxDecoration(
                   color: MediSathiColors.cardBackground,
@@ -141,6 +171,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ],
                 ),
+                  ),
+                  if (_androidNative) ...[
+                    const SizedBox(height: 24),
+                    const AndroidReleaseDownloadPanel(),
+                  ],
+                ],
               ),
             ),
           ),

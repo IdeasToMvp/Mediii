@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import multer from "multer";
 import { createClient } from "@supabase/supabase-js";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID, timingSafeEqual } from "crypto";
 import path from "path";
 import OpenAI from "openai";
 import { analyzeMedicalDocumentImage } from "./openaiMedicalDocument.js";
@@ -40,6 +40,14 @@ const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: UPLOAD_MAX_BYTES },
+});
+
+/** Must stay ≤ Supabase bucket `file_size_limit` for `app-distributions` (see migrations 011 / 012). */
+const APK_UPLOAD_MAX_BYTES = 500 * 1024 * 1024;
+
+const uploadApk = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: APK_UPLOAD_MAX_BYTES },
 });
 
 const app = express();
@@ -1295,6 +1303,467 @@ app.delete("/api/medicine-schedules/:id", requireUser, async (req, res) => {
   );
   if (error) return res.status(400).json({ error: error.message });
   res.status(204).end();
+});
+
+const APP_RELEASES_PUBLIC_FIELDS =
+  "id, platform, version_label, version_code, channel, release_notes, apk_filename, apk_byte_size, apk_sha256_hex, created_at, apk_download_url";
+
+/**
+ * Prefer Google Drive `uc?export=download` URLs; keep other https links as-is (trim + strip hash).
+ */
+function normalizeHostedDistributionUrl(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  let u;
+  try {
+    u = new URL(s);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:") {
+    return null;
+  }
+  const host = u.hostname.toLowerCase();
+  if (host === "drive.google.com") {
+    let id = u.searchParams.get("id");
+    const mPath = u.pathname.match(/\/(?:file\/)?d\/([a-zA-Z0-9_-]+)/);
+    if (!id && mPath) id = mPath[1];
+    if (id && /^[a-zA-Z0-9_-]+$/.test(id)) {
+      return `https://drive.google.com/uc?export=download&id=${id}`;
+    }
+  }
+  if (host === "docs.google.com" && u.pathname.startsWith("/uc")) {
+    return u.toString().split("#")[0];
+  }
+  return u.toString().split("#")[0];
+}
+
+function parseReleaseChannel(raw) {
+  const s = String(raw || "production").trim().toLowerCase();
+  if (s === "beta" || s === "internal") return s;
+  return "production";
+}
+
+/** @param {unknown} body */
+function platformFromBody(body) {
+  const o = body && typeof body === "object" ? body : {};
+  const alias = /** @type {Record<string, unknown>} */ (o).build_type ?? /** @type {Record<string, unknown>} */ (o).platform;
+  const raw = alias !== undefined && alias !== null ? String(alias).trim().toLowerCase() : "";
+  return parseBuildPlatform(raw || "android");
+}
+
+function parseBuildPlatform(raw) {
+  const s = String(raw ?? "android").trim().toLowerCase();
+  if (s === "ios") return "ios";
+  return "android";
+}
+
+function requireApkAdminUploadToken(req, res, next) {
+  const expected = process.env.APK_ADMIN_UPLOAD_TOKEN?.trim();
+  if (!expected) {
+    res.status(503).json({
+      error: "apk_admin_disabled",
+      detail: "Set APK_ADMIN_UPLOAD_TOKEN in the server environment to enable admin APK / link releases.",
+    });
+    return;
+  }
+  const header = req.headers["x-admin-upload-token"] || req.headers["x-apk-admin-token"] || "";
+  const got = Array.isArray(header) ? header[0] : header;
+  const a = String(got || "").trim();
+  const b = expected;
+  if (!a || a.length !== b.length) {
+    res.status(401).json({
+      error: "invalid_upload_token",
+      detail: "Send header X-Admin-Upload-Token matching APK_ADMIN_UPLOAD_TOKEN",
+    });
+    return;
+  }
+  try {
+    if (!timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"))) {
+      res.status(401).json({ error: "invalid_upload_token" });
+      return;
+    }
+  } catch {
+    res.status(401).json({ error: "invalid_upload_token" });
+    return;
+  }
+  next();
+}
+
+/** Latest Android build metadata (public; download via signed Storage URL or apk_download_url). */
+app.get("/api/app-releases/latest", async (req, res) => {
+  try {
+    const admin = getSupabaseAdmin();
+    if (!admin) {
+      res.status(503).json({ error: "server_misconfigured", detail: "SUPABASE_SERVICE_ROLE_KEY is required" });
+      return;
+    }
+    const channel = parseReleaseChannel(req.query.channel);
+    const platform = parseBuildPlatform(req.query.platform);
+    const { data, error } = await admin
+      .from("app_releases")
+      .select(APP_RELEASES_PUBLIC_FIELDS)
+      .eq("channel", channel)
+      .eq("platform", platform)
+      .order("version_code", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      res.status(500).json({ error: "release_query_failed", detail: error.message });
+      return;
+    }
+    if (!data) {
+      res.status(404).json({
+        error: "no_release",
+        detail: `No ${platform.toUpperCase()} build published for channel '${channel}' yet.`,
+      });
+      return;
+    }
+
+    res.json({ release: data });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "release_load_failed", detail: String(e.message || e) });
+  }
+});
+
+/** Short-lived signed URL to download the APK (public). */
+app.get("/api/app-releases/:id/download-url", async (req, res) => {
+  try {
+    const admin = getSupabaseAdmin();
+    if (!admin) {
+      res.status(503).json({ error: "server_misconfigured", detail: "SUPABASE_SERVICE_ROLE_KEY is required" });
+      return;
+    }
+
+    const id = String(req.params.id || "").trim();
+    if (!id) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+
+    const { data: row, error: fetchErr } = await admin.from("app_releases").select("*").eq("id", id).maybeSingle();
+    if (fetchErr) {
+      console.error(fetchErr);
+      res.status(500).json({ error: "release_query_failed", detail: fetchErr.message });
+      return;
+    }
+    if (!row) {
+      res.status(404).json({ error: "release_not_found" });
+      return;
+    }
+
+    const ttlRaw = Number.parseInt(process.env.APK_DOWNLOAD_URL_TTL_SEC || "3600", 10);
+    const ttl = Math.min(Math.max(Number.isFinite(ttlRaw) ? ttlRaw : 3600, 60), 60 * 60 * 24 * 7);
+
+    if (typeof row.apk_download_url === "string" && row.apk_download_url.trim()) {
+      const dl = normalizeHostedDistributionUrl(row.apk_download_url) || row.apk_download_url.trim();
+      /** @type {Record<string, any>} */
+      const pub = {};
+      for (const k of APP_RELEASES_PUBLIC_FIELDS.split(/\s*,\s*/)) {
+        if (row[k] !== undefined) pub[k] = row[k];
+      }
+      res.json({
+        download_url: dl,
+        expires_in_seconds: null,
+        filename: row.apk_filename,
+        release: pub,
+      });
+      return;
+    }
+
+    if (!row.apk_storage_path) {
+      res.status(500).json({ error: "release_has_no_download", detail: "No storage path or external URL configured." });
+      return;
+    }
+
+    const { data: signed, error: signErr } = await admin.storage.from("app-distributions").createSignedUrl(row.apk_storage_path, ttl, {
+      download: row.apk_filename || "MediSathi.apk",
+    });
+
+    if (signErr || !signed?.signedUrl) {
+      console.error(signErr);
+      res.status(500).json({ error: "signed_url_failed", detail: signErr?.message || "unknown" });
+      return;
+    }
+
+    /** @type {Record<string, any>} */
+    const pub = {};
+    for (const k of APP_RELEASES_PUBLIC_FIELDS.split(/\s*,\s*/)) {
+      if (row[k] !== undefined) pub[k] = row[k];
+    }
+
+    res.json({
+      download_url: signed.signedUrl,
+      expires_in_seconds: ttl,
+      filename: row.apk_filename,
+      release: pub,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "download_url_failed", detail: String(e.message || e) });
+  }
+});
+
+/**
+ * Publish a new APK (manual / Postman). Auth: header X-Admin-Upload-Token (see APK_ADMIN_UPLOAD_TOKEN).
+ * Multipart fields: apk (file), version, version_code, release_notes?, channel?, platform? / build_type? (android|ios)
+ */
+app.post("/api/admin/app-releases", requireApkAdminUploadToken, uploadApk.single("apk"), async (req, res) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({
+        error: "missing_apk",
+        detail: 'Multipart field "apk" (artifact file). Max size 500 MB. Optional text fields: platform or build_type (android|ios).',
+        max_bytes: APK_UPLOAD_MAX_BYTES,
+      });
+      return;
+    }
+
+    const admin = getSupabaseAdmin();
+    if (!admin) {
+      res.status(503).json({ error: "server_misconfigured", detail: "SUPABASE_SERVICE_ROLE_KEY is required" });
+      return;
+    }
+
+    const versionLabel = String(req.body?.version || req.body?.version_label || "").trim();
+    if (!versionLabel || versionLabel.length > 80) {
+      res.status(400).json({
+        error: "invalid_version",
+        detail: 'Form field "version" is required (e.g. 1.4.2), max 80 characters.',
+      });
+      return;
+    }
+
+    let versionCode = Number.parseInt(String(req.body?.version_code ?? ""), 10);
+    if (!Number.isFinite(versionCode)) {
+      res.status(400).json({
+        error: "invalid_version_code",
+        detail: 'Form field "version_code" must be an integer (Android versionCode from build.gradle).',
+      });
+      return;
+    }
+    versionCode = Math.trunc(versionCode);
+    if (versionCode < 1 || versionCode > 2147483647) {
+      res.status(400).json({ error: "invalid_version_code", detail: "version_code must be between 1 and 2^31-1" });
+      return;
+    }
+
+    const channel = parseReleaseChannel(req.body?.channel);
+    const platform = platformFromBody(req.body);
+    const notes = typeof req.body?.release_notes === "string" ? req.body.release_notes.trim().slice(0, 32000) : "";
+
+    let origDefault = platform === "ios" ? "medisathi-release.ipa" : "medisathi-release.apk";
+    let orig =
+      typeof req.file.originalname === "string" && req.file.originalname.trim() ?
+        req.file.originalname.trim().slice(0, 240)
+      : origDefault;
+
+    const wantExt = platform === "ios" ? ".ipa" : ".apk";
+    if (!orig.toLowerCase().endsWith(wantExt)) {
+      orig = `${orig.replace(/\.+$/g, "")}${wantExt}`;
+    }
+
+    const mime = (req.file.mimetype || "").toLowerCase();
+    /** @type {boolean} */
+    const mimeOk =
+      platform === "ios" ?
+        mime === "" ||
+        mime === "application/octet-stream" ||
+        mime === "application/zip" ||
+        mime === "application/x-itunes-ipa" ||
+        mime === "application/x-zip-compressed"
+      : mime === "" ||
+        mime === "application/octet-stream" ||
+        mime === "application/vnd.android.package-archive" ||
+        mime === "application/apk";
+
+    if (!mimeOk) {
+      res.status(400).json({
+        error: "invalid_artifact_mime",
+        detail:
+          platform === "ios" ?
+            "For iOS uploads use application/octet-stream / zip (IPA), or omit Content-Type."
+          : "For Android use application/vnd.android.package-archive or application/octet-stream.",
+        received_mime: mime,
+        platform,
+      });
+      return;
+    }
+
+    const sha256 = createHash("sha256").update(req.file.buffer).digest("hex");
+    const id = randomUUID();
+    const artifactExt = platform === "ios" ? "ipa" : "apk";
+    const objectPath = `releases/${id}.${artifactExt}`;
+
+    const storageContentType =
+      platform === "ios" ? "application/octet-stream" : "application/vnd.android.package-archive";
+
+    const { error: upErr } = await admin.storage.from("app-distributions").upload(objectPath, req.file.buffer, {
+      contentType: storageContentType,
+      upsert: false,
+    });
+
+    if (upErr) {
+      console.error(upErr);
+      res.status(500).json({ error: "storage_upload_failed", detail: upErr.message });
+      return;
+    }
+
+    const row = {
+      id,
+      platform,
+      version_label: versionLabel,
+      version_code: versionCode,
+      channel,
+      release_notes: notes,
+      apk_storage_path: objectPath,
+      apk_download_url: null,
+      apk_filename: orig,
+      apk_byte_size: req.file.size,
+      apk_sha256_hex: sha256,
+    };
+
+    const { data: inserted, error: insErr } = await admin.from("app_releases").insert(row).select(APP_RELEASES_PUBLIC_FIELDS).single();
+
+    if (insErr) {
+      console.error(insErr);
+      await admin.storage.from("app-distributions").remove([objectPath]).catch(() => {});
+      res.status(500).json({ error: "release_insert_failed", detail: insErr.message });
+      return;
+    }
+
+    res.status(201).json({
+      release: inserted,
+      download_example: `GET ${req.protocol}://${req.get("host")}/api/app-releases/${id}/download-url`,
+    });
+  } catch (e) {
+    console.error(e);
+    const msg = String(e.message || "");
+    if (msg === "Multipart: Unexpected field") {
+      res.status(400).json({
+        error: "unexpected_multipart_field",
+        detail: "Use multipart field name 'apk' for the file",
+        max_bytes: APK_UPLOAD_MAX_BYTES,
+      });
+      return;
+    }
+    res.status(500).json({ error: "apk_upload_failed", detail: msg });
+  }
+});
+
+/**
+ * Register a release with an externally hosted artifact (HTTPS), e.g. Google Drive link to APK or IPA.
+ * Body JSON: download_url, version, version_code, platform?, build_type?, release_notes?, channel?, apk_filename?, apk_byte_size?
+ */
+app.post("/api/admin/app-releases/link", requireApkAdminUploadToken, async (req, res) => {
+  try {
+    const admin = getSupabaseAdmin();
+    if (!admin) {
+      res.status(503).json({ error: "server_misconfigured", detail: "SUPABASE_SERVICE_ROLE_KEY is required" });
+      return;
+    }
+
+    const rawLink = typeof req.body?.download_url === "string" ? req.body.download_url.trim() : "";
+    if (!rawLink) {
+      res.status(400).json({
+        error: "missing_download_url",
+        detail: 'JSON body field "download_url" is required (Google Drive sharing link or other https APK URL).',
+      });
+      return;
+    }
+
+    const naked = rawLink.split("#")[0].trim();
+
+    const normalized = normalizeHostedDistributionUrl(naked);
+    const canonical = normalized || naked;
+    if (!canonical.startsWith("https://")) {
+      res.status(400).json({
+        error: "invalid_download_url",
+        detail: "Only HTTPS download URLs are accepted.",
+      });
+      return;
+    }
+
+    const versionLabel = String(req.body?.version || req.body?.version_label || "").trim();
+    if (!versionLabel || versionLabel.length > 80) {
+      res.status(400).json({
+        error: "invalid_version",
+        detail: '"version" is required (e.g. 1.4.2), max 80 characters.',
+      });
+      return;
+    }
+
+    let versionCode = Number.parseInt(String(req.body?.version_code ?? ""), 10);
+    if (!Number.isFinite(versionCode)) {
+      res.status(400).json({
+        error: "invalid_version_code",
+        detail: '"version_code" must be an integer matching Android versionCode.',
+      });
+      return;
+    }
+    versionCode = Math.trunc(versionCode);
+    if (versionCode < 1 || versionCode > 2147483647) {
+      res.status(400).json({ error: "invalid_version_code" });
+      return;
+    }
+
+    const channel = parseReleaseChannel(req.body?.channel);
+    const platform = platformFromBody(req.body);
+    const notes = typeof req.body?.release_notes === "string" ? req.body.release_notes.trim().slice(0, 32000) : "";
+
+    const defaultFn = platform === "ios" ? "MediSathi.ipa" : "MediSathi.apk";
+    const wantExt = platform === "ios" ? ".ipa" : ".apk";
+    let filename =
+      typeof req.body?.apk_filename === "string" && req.body.apk_filename.trim().length ?
+        req.body.apk_filename.trim().slice(0, 240)
+      : defaultFn;
+    if (!filename.toLowerCase().endsWith(wantExt)) {
+      filename = `${filename.replace(/\.+$/g, "")}${wantExt}`;
+    }
+
+    let byteSize = null;
+    const rawSz = req.body?.apk_byte_size;
+    if (rawSz !== undefined && rawSz !== null && String(rawSz).trim() !== "") {
+      const n = Number(rawSz);
+      if (Number.isFinite(n) && n > 0 && n <= 20 * 1024 * 1024 * 1024) byteSize = Math.trunc(n);
+    }
+
+    const id = randomUUID();
+    const row = {
+      id,
+      platform,
+      version_label: versionLabel,
+      version_code: versionCode,
+      channel,
+      release_notes: notes,
+      apk_storage_path: null,
+      apk_download_url: canonical,
+      apk_filename: filename,
+      apk_byte_size: byteSize,
+      apk_sha256_hex: null,
+    };
+
+    const { data: inserted, error: insErr } = await admin.from("app_releases").insert(row).select(APP_RELEASES_PUBLIC_FIELDS).single();
+
+    if (insErr) {
+      console.error(insErr);
+      res.status(500).json({ error: "release_insert_failed", detail: insErr.message });
+      return;
+    }
+
+    res.status(201).json({
+      release: inserted,
+      resolved_download_url: inserted?.apk_download_url,
+      hint: `GET ${req.protocol}://${req.get("host")}/api/app-releases/${id}/download-url returns JSON with download_url.`,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "link_release_failed", detail: String(e.message || e) });
+  }
 });
 
 async function hydratePrescription(supabase, id) {
