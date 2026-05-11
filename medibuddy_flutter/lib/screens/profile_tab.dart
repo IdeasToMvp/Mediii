@@ -262,6 +262,8 @@ class ProfileTab extends StatelessWidget {
     String famSlots,
     String famCap,
   ) {
+    final accessRaw = plan is Map ? plan!['pro_access_until']?.toString().trim() : null;
+    final proAccessUntil = (accessRaw != null && accessRaw.isNotEmpty) ? accessRaw : null;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -272,6 +274,7 @@ class ProfileTab extends StatelessWidget {
         famCap: famCap,
         api: medibuddyApi,
         currentPlanSlug: planSlug,
+        proAccessUntilIso: proAccessUntil,
         userEmail: userEmail,
         onPurchased: onSubscriptionUpdated,
       ),

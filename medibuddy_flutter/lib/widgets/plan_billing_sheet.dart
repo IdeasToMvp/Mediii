@@ -2,10 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../platform/razorpay_web_checkout.dart' show openRazorpaySubscriptionCheckoutWeb;
 import '../services/medibuddy_api.dart';
+import '../theme/medisathi_colors.dart';
 
 /// Bottom sheet: current usage + upgrade to **Pro** (only paid tier).
 class PlanBillingSheet extends StatefulWidget {
@@ -16,6 +18,7 @@ class PlanBillingSheet extends StatefulWidget {
     required this.famCap,
     required this.api,
     required this.currentPlanSlug,
+    this.proAccessUntilIso,
     required this.userEmail,
     required this.onPurchased,
   });
@@ -25,6 +28,8 @@ class PlanBillingSheet extends StatefulWidget {
   final String famCap;
   final MediBuddyApi api;
   final String currentPlanSlug;
+  /// From `/api/me` → `plan.pro_access_until` (ISO-8601). Current period end / prepaid access end.
+  final String? proAccessUntilIso;
   final String? userEmail;
   final Future<void> Function() onPurchased;
 
@@ -161,54 +166,351 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
   Widget build(BuildContext context) {
     final slug = widget.currentPlanSlug.trim().toLowerCase();
     final onPro = slug == 'pro';
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final accessEnd = _parseAccessIso(widget.proAccessUntilIso);
+    final dateFormat = DateFormat.yMMMEd();
+    final famUsed = int.tryParse(widget.famSlots.trim());
+    final famCapNum = widget.famCap.trim() == '∞' ? null : int.tryParse(widget.famCap.trim());
+    final famProgress =
+        (famUsed != null && famCapNum != null && famCapNum > 0) ? (famUsed / famCapNum).clamp(0.0, 1.0) : null;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 8, 20, 28 + MediaQuery.paddingOf(context).bottom),
+    return SingleChildScrollView(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 4, 20, 24 + bottomInset),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    gradient: onPro ?
+                        LinearGradient(
+                          colors: [
+                            MediSathiColors.brandBlue.withValues(alpha: 0.2),
+                            const Color(0xFF0369A1).withValues(alpha: 0.18),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
+                    : null,
+                    color: onPro ? null : cs.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: onPro ? MediSathiColors.brandBlue.withValues(alpha: 0.25) : cs.outlineVariant),
+                  ),
+                  child: Icon(
+                    onPro ? Icons.workspace_premium_rounded : Icons.person_outline_rounded,
+                    color: onPro ? const Color(0xFF0369A1) : cs.onSurfaceVariant,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your plan',
+                        style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        onPro ? 'Premium · more room for your family' : 'See what you get on Pro',
+                        style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                gradient: onPro ?
+                    LinearGradient(
+                      colors: [
+                        const Color(0xFF0C4A6E).withValues(alpha: 0.06),
+                        MediSathiColors.brandBlue.withValues(alpha: 0.08),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    )
+                : null,
+                color: onPro ? null : cs.surfaceContainerLow,
+                border: Border.all(
+                  color: onPro ? MediSathiColors.brandBlue.withValues(alpha: 0.22) : cs.outlineVariant.withValues(alpha: 0.6),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: onPro ? const Color(0xFF0369A1) : cs.onSurfaceVariant.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            onPro ? 'PRO' : 'FREE',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                                  color: onPro ? Colors.white : cs.onSurfaceVariant,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.6,
+                                ),
+                          ),
+                        ),
+                        const Spacer(),
+                        if (onPro)
+                          Icon(Icons.verified_rounded, color: MediSathiColors.brandBlue.withValues(alpha: 0.85), size: 22),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      widget.planLabel.isEmpty ? 'Free' : widget.planLabel,
+                      style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, height: 1.15),
+                    ),
+                    if (onPro) ...[
+                      const SizedBox(height: 14),
+                      if (accessEnd != null)
+                        _AccessDateRow(
+                          icon: Icons.event_available_rounded,
+                          label: 'Paid through',
+                          value: dateFormat.format(accessEnd.toLocal()),
+                          sub: 'End of your current billing period. Renews unless you cancel.',
+                          emphasisColor: const Color(0xFF0369A1),
+                        )
+                      else
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: cs.surface.withValues(alpha: 0.7),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.info_outline_rounded, size: 20, color: cs.primary),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Billing period date appears after checkout or sync. Pull down on this screen to refresh.',
+                                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.35),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text('Included with your plan', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 10),
+            _FeatureLine(icon: Icons.groups_outlined, text: 'Household profiles — Free: 2 · Pro: up to 10'),
+            const SizedBox(height: 8),
+            _FeatureLine(
+              icon: Icons.picture_as_pdf_outlined,
+              text: 'PDF uploads, batch scans, higher AI allowance (enforced on the server)',
+            ),
+            const SizedBox(height: 18),
+            Text('Usage', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text('Household profiles', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                      ),
+                      Text(
+                        '${widget.famSlots} / ${widget.famCap}',
+                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800, color: cs.primary),
+                      ),
+                    ],
+                  ),
+                  if (famProgress != null) ...[
+                    const SizedBox(height: 10),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: famProgress,
+                        minHeight: 6,
+                        backgroundColor: cs.outlineVariant.withValues(alpha: 0.35),
+                        color: MediSathiColors.brandBlue,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 22),
+            if (!onPro) ...[
+              Text('Upgrade to Pro', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 10),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  backgroundColor: MediSathiColors.brandBlue,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: _busy ? null : () => _checkoutPro('monthly'),
+                child: const Text('Pro — billed monthly'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: _busy ? null : () => _checkoutPro('annual'),
+                child: const Text('Pro — billed yearly (save vs monthly)'),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                kIsWeb ? 'Razorpay loads scripts when checkout opens — normal with test keys.' : 'Secured by Razorpay Checkout.',
+                style: theme.textTheme.bodySmall?.copyWith(color: cs.outline),
+              ),
+            ] else
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.receipt_long_outlined, size: 22, color: cs.onSurfaceVariant),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Manage or cancel from your Razorpay receipts and emails, or contact support — you keep Pro until the paid-through date above.',
+                        style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_busy) ...[const SizedBox(height: 20), const Center(child: CircularProgressIndicator(strokeWidth: 2.3))],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+DateTime? _parseAccessIso(String? raw) {
+  if (raw == null) return null;
+  final t = raw.trim();
+  if (t.isEmpty) return null;
+  return DateTime.tryParse(t);
+}
+
+class _FeatureLine extends StatelessWidget {
+  const _FeatureLine({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: MediSathiColors.brandBlue.withValues(alpha: 0.9)),
+        const SizedBox(width: 10),
+        Expanded(child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.4))),
+      ],
+    );
+  }
+}
+
+class _AccessDateRow extends StatelessWidget {
+  const _AccessDateRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.sub,
+    required this.emphasisColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String sub;
+  final Color emphasisColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.surface.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: emphasisColor.withValues(alpha: 0.22)),
+      ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Your plan', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-          const SizedBox(height: 12),
-          Text(widget.planLabel.isEmpty ? 'Free' : widget.planLabel, style: Theme.of(context).textTheme.bodyLarge),
-          const SizedBox(height: 8),
-          Text(
-            'Free: up to 2 household profiles · Pro: up to 10, PDF & batch uploads, higher AI allowance (limits apply server-side).',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.outline),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: emphasisColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+                child: Icon(icon, size: 22, color: emphasisColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label.toUpperCase(),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.8,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      value,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: cs.onSurface,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Household profiles'),
-            trailing:
-                Text('${widget.famSlots} / ${widget.famCap}', style: const TextStyle(fontWeight: FontWeight.w600)),
-          ),
-          const SizedBox(height: 16),
-          if (!onPro) ...[
-            Text('Upgrade', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            FilledButton(
-              onPressed: _busy ? null : () => _checkoutPro('monthly'),
-              child: const Text('Pro — billed monthly'),
-            ),
-            const SizedBox(height: 8),
-            FilledButton.tonal(
-              onPressed: _busy ? null : () => _checkoutPro('annual'),
-              child: const Text('Pro — billed yearly'),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              kIsWeb ?
-                  'Razorpay loads many small scripts when checkout opens — normal. Use Test keys while developing.'
-              : 'Uses Razorpay Checkout. Set RAZORPAY_PLAN_ID_PRO_MONTHLY, RAZORPAY_PLAN_ID_PRO_ANNUAL, and webhook secret on the server.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.outline),
-            ),
-          ] else
-            Text(
-              'You are on Pro. Manage billing via Razorpay receipts or support if you need to cancel.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.outline),
-            ),
-          if (_busy) ...[const SizedBox(height: 16), const Center(child: CircularProgressIndicator(strokeWidth: 2))],
+          const SizedBox(height: 10),
+          Text(sub, style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.35)),
         ],
       ),
     );
