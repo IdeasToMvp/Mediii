@@ -8,6 +8,7 @@ import '../models/prescription.dart';
 import '../services/medibuddy_api.dart';
 import '../widgets/family_member_bottom_sheet.dart';
 import '../widgets/medisathi_loader.dart';
+import '../widgets/prescription_detail_sheet.dart';
 import 'documents_library_tab.dart';
 import 'medicine_reminders_tab.dart';
 import 'add_prescription_manual_screen.dart';
@@ -281,76 +282,12 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
   }
 
   Future<void> _showDetail(BuildContext context, Prescription p) async {
-    final buffer = StringBuffer();
-    buffer.writeln('Kind: ${p.documentKind ?? 'prescription'}');
-    if ((p.sourceStoragePath ?? '').trim().isNotEmpty) {
-      buffer.writeln('Original file stored: yes');
-      if ((p.sourceOriginalName ?? '').trim().isNotEmpty) {
-        buffer.writeln('Uploaded as: ${p.sourceOriginalName}');
-      }
-    } else {
-      buffer.writeln('Original file stored: no');
-    }
-    buffer.writeln(p.patientName != null ? 'Patient: ${p.patientName}' : 'Patient: —');
-    buffer.writeln(p.patientFamilyMemberId != null ? 'Linked family member id: ${p.patientFamilyMemberId}' : 'Linked family member id: —');
-    buffer.writeln(p.doctorName != null ? 'Doctor: ${p.doctorName}' : 'Doctor: —');
-    buffer.writeln(p.prescriptionDate != null ? 'Date: ${p.prescriptionDate}' : 'Date: —');
-    buffer.writeln(p.diagnosis != null ? 'Diagnosis: ${p.diagnosis}' : 'Diagnosis: —');
-    buffer.writeln();
-    if (p.isReport && p.reportSummary != null && p.reportSummary!.isNotEmpty) {
-      buffer.writeln('Report summary (JSON)');
-      buffer.writeln(const JsonEncoder.withIndent('  ').convert(p.reportSummary));
-      buffer.writeln();
-    }
-    buffer.writeln('Medications');
-    var i = 1;
-    for (final med in p.medications) {
-      final name = med['name']?.toString() ?? '(unnamed)';
-      buffer.writeln('$i. $name');
-      for (final k in ['dosage', 'frequency', 'duration', 'instructions']) {
-        final v = med[k]?.toString().trim();
-        if (v == null || v.isEmpty) continue;
-        buffer.writeln('   $k: $v');
-      }
-      i++;
-    }
-    if ((p.generalInstructions ?? '').trim().isNotEmpty) {
-      buffer.writeln();
-      buffer.writeln('General instructions:\n${p.generalInstructions!.trim()}');
-    }
-    if ((p.extractionNotes ?? '').trim().isNotEmpty) {
-      buffer.writeln();
-      buffer.writeln('Extraction notes:\n${p.extractionNotes!.trim()}');
-    }
-
     if (!context.mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(p.isReport ? 'Report detail' : 'Prescription detail'),
-          content: SingleChildScrollView(child: SelectableText(buffer.toString())),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close')),
-            if (!p.isReport)
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  _openEditPrescription(p);
-                },
-                child: const Text('Edit'),
-              ),
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(dialogContext);
-                await _deletePrescriptionAfterConfirm(p);
-              },
-              style: TextButton.styleFrom(foregroundColor: Theme.of(dialogContext).colorScheme.error),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
+    await showPrescriptionDetailSheet(
+      context,
+      p: p,
+      onEdit: () => _openEditPrescription(p),
+      onDeleteConfirmed: () => _deletePrescriptionAfterConfirm(p),
     );
   }
 
