@@ -45,6 +45,7 @@ class Prescription {
     required this.source,
     this.title,
     this.patientName,
+    this.patientFamilyMemberId,
     this.doctorName,
     this.prescriptionDate,
     this.diagnosis,
@@ -53,12 +54,16 @@ class Prescription {
     required this.medications,
     this.rawAnalysis,
     required this.createdAt,
+    this.documentKind,
+    this.reportSummary,
   });
 
   final String id;
   final String source;
   final String? title;
   final String? patientName;
+  /// Matched / assigned family profile for the named patient (household).
+  final String? patientFamilyMemberId;
   final String? doctorName;
   final String? prescriptionDate;
   final String? diagnosis;
@@ -67,6 +72,10 @@ class Prescription {
   final List<Map<String, dynamic>> medications;
   final Map<String, dynamic>? rawAnalysis;
   final DateTime? createdAt;
+  /// `prescription` or `report` (labs / diagnostics analysis).
+  final String? documentKind;
+  /// Populated when [documentKind] == `report`.
+  final Map<String, dynamic>? reportSummary;
 
   factory Prescription.fromJson(Map<String, dynamic> m) {
     final medsDynamic = m['medications'];
@@ -74,11 +83,18 @@ class Prescription {
         ? medsDynamic.map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map)).toList()
         : <Map<String, dynamic>>[];
 
+    Map<String, dynamic>? reportSummary;
+    final rs = m['report_summary'];
+    if (rs is Map) reportSummary = Map<String, dynamic>.from(rs);
+
+    final dk = (_opt(m['document_kind']) ?? 'prescription').toLowerCase().trim();
+
     return Prescription(
       id: m['id'].toString(),
       source: (m['source'] ?? '').toString(),
       title: _opt(m['title']),
       patientName: _opt(m['patient_name']),
+      patientFamilyMemberId: _opt(m['patient_family_member_id']),
       doctorName: _opt(m['doctor_name']),
       prescriptionDate: _opt(m['prescription_date']),
       diagnosis: _opt(m['diagnosis']),
@@ -87,8 +103,12 @@ class Prescription {
       medications: medsList,
       rawAnalysis: m['raw_analysis'] is Map ? Map<String, dynamic>.from(m['raw_analysis'] as Map) : null,
       createdAt: m['created_at'] != null ? DateTime.tryParse(m['created_at'].toString()) : null,
+      documentKind: dk == 'report' ? 'report' : 'prescription',
+      reportSummary: reportSummary,
     );
   }
+
+  bool get isReport => documentKind == 'report';
 
   static String? _opt(dynamic v) {
     if (v == null) return null;

@@ -20,6 +20,20 @@ Future<void> _exchangeOAuthCodeOnWeb() async {
   }
 }
 
+/// Web (and some browsers) can briefly report negative keyboard insets during
+/// resize; the Flutter web engine asserts on non-negative view insets.
+MediaQueryData _nonNegativeViewInsets(MediaQueryData mq) {
+  final v = mq.viewInsets;
+  return mq.copyWith(
+    viewInsets: EdgeInsets.fromLTRB(
+      v.left.clamp(0.0, double.infinity),
+      v.top.clamp(0.0, double.infinity),
+      v.right.clamp(0.0, double.infinity),
+      v.bottom.clamp(0.0, double.infinity),
+    ),
+  );
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -48,6 +62,9 @@ class MediBuddyApp extends StatelessWidget {
     return MaterialApp(
       title: 'MediSathi',
       theme: AppTheme.mobileFirst(),
+      builder: (context, child) {
+        return MediaQuery(data: _nonNegativeViewInsets(MediaQuery.of(context)), child: child ?? const SizedBox.shrink());
+      },
       home: AppTheme.constrainMobileWidth(maxWidth: 640, child: const AppBootstrap()),
     );
   }
@@ -61,6 +78,9 @@ class _MissingSupabaseConfigApp extends StatelessWidget {
     return MaterialApp(
       title: 'MediSathi',
       theme: AppTheme.mobileFirst(),
+      builder: (context, child) {
+        return MediaQuery(data: _nonNegativeViewInsets(MediaQuery.of(context)), child: child ?? const SizedBox.shrink());
+      },
       home: AppTheme.constrainMobileWidth(
         maxWidth: 640,
         child: Scaffold(

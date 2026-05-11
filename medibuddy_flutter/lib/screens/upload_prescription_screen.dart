@@ -23,6 +23,10 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
 
   Map<String, dynamic>? _analysis;
 
+  bool get _isAnalysisReport =>
+      _analysis != null &&
+      (_analysis!['document_kind'] ?? 'prescription').toString().toLowerCase().trim() == 'report';
+
   final _title = TextEditingController();
   final _patient = TextEditingController();
   final _doctor = TextEditingController();
@@ -142,30 +146,47 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
       );
       return;
     }
+    final kind = (_analysis?['document_kind'] ?? 'prescription').toString().toLowerCase().trim();
+    final isReport = kind == 'report';
+
     final meds = <Map<String, dynamic>>[];
-    for (final row in _meds) {
-      final name = row.name.text.trim();
-      if (name.isEmpty) continue;
-      meds.add(
-        PrescriptionMedication(
-          name: name,
-          dosage: _nullIfEmpty(row.dosage.text),
-          frequency: _nullIfEmpty(row.frequency.text),
-          duration: _nullIfEmpty(row.duration.text),
-          instructions: _nullIfEmpty(row.instructions.text),
-        ).toApiMap(),
-      );
+    if (!isReport) {
+      for (final row in _meds) {
+        final name = row.name.text.trim();
+        if (name.isEmpty) continue;
+        meds.add(
+          PrescriptionMedication(
+            name: name,
+            dosage: _nullIfEmpty(row.dosage.text),
+            frequency: _nullIfEmpty(row.frequency.text),
+            duration: _nullIfEmpty(row.duration.text),
+            instructions: _nullIfEmpty(row.instructions.text),
+          ).toApiMap(),
+        );
+      }
+      if (meds.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Add at least one medication name after review.')),
+        );
+        return;
+      }
     }
-    if (meds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add at least one medication name after review.')),
-      );
-      return;
+
+    Map<String, dynamic>? reportSummary;
+    if (isReport) {
+      final raw = _analysis!['report_summary'];
+      if (raw is Map<String, dynamic>) {
+        reportSummary = Map<String, dynamic>.from(raw);
+      } else if (raw is Map) {
+        reportSummary = Map<String, dynamic>.from(raw);
+      } else {
+        reportSummary = {};
+      }
     }
 
     setState(() => _saving = true);
     try {
-      await _api.createPrescription(
+      final res = await _api.createPrescription(
         source: 'analyzed',
         title: _title.text,
         patientName: _patient.text,
@@ -174,10 +195,40 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
         diagnosis: _diagnosis.text,
         generalInstructions: _general.text,
         extractionNotes: _notes.text,
-        medications: meds,
+        medications: isReport ? [] : meds,
         rawAnalysis: _analysis,
+        documentKind: isReport ? 'report' : 'prescription',
+        reportSummary: reportSummary,
       );
+
       if (!mounted) return;
+
+      final buf = StringBuffer('Saved.');
+      final pf = res['patient_family_resolution'];
+      if (!isReport && pf is Map) {
+        final mode = pf['mode']?.toString() ?? '';
+        if (mode == 'matched') {
+          buf.write(' Linked patient to a matching family member.');
+        } else if (mode == 'random') {
+          buf.write(' Patient name had no match — linked reminders to a random household profile.');
+        } else if (mode == 'explicit') {
+          buf.write(' Patient linked to the selected household profile.');
+        } else if (mode == 'none') {
+          buf.write(' No household profile match (empty name or no members). Reminders attach to your account.');
+        }
+      }
+
+      final reminders = res['reminders'];
+      if (!isReport && reminders is Map) {
+        final gen = reminders['generated'];
+        if (gen is int && gen > 0) {
+          buf.write(' Created $gen reminder schedule(s).');
+        } else if (reminders['error'] != null) {
+          buf.write(' Reminders: ${reminders['error']}');
+        }
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(buf.toString())));
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
@@ -255,6 +306,23 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
           ),
           if (_analysis != null) ...[
             const SizedBox(height: 22),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Chip(
+                avatar: Icon(
+                  ((_analysis!['document_kind'] ?? 'prescription').toString().toLowerCase()) == 'report'
+                      ? Icons.analytics_outlined
+                      : Icons.medication_outlined,
+                  size: 18,
+                ),
+                label: Text(
+                  ((_analysis!['document_kind'] ?? 'prescription').toString().toLowerCase()) == 'report'
+                      ? 'Detected: report / labs'
+                      : 'Detected: prescription',
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
             Text('Review & edit', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
             TextField(controller: _title, decoration: const InputDecoration(labelText: 'Title / clinic name')),
@@ -263,7 +331,7 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
             const SizedBox(height: 10),
             TextField(controller: _doctor, decoration: const InputDecoration(labelText: 'Doctor name')),
             const SizedBox(height: 10),
-            TextField(controller: _date, decoration: const InputDecoration(labelText: 'Prescription date')),
+            TextField(controller: _date, decoration: const InputDecoration(labelText: 'Date on document')),
             const SizedBox(height: 10),
             TextField(controller: _diagnosis, decoration: const InputDecoration(labelText: 'Diagnosis')),
             const SizedBox(height: 10),
@@ -281,31 +349,39 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
               decoration: const InputDecoration(labelText: 'Extraction notes (from AI / caveats)'),
             ),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Text('Medications', style: Theme.of(context).textTheme.titleSmall),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () => setState(() => _meds.add(_MedRow())),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add row'),
-                ),
-              ],
-            ),
-            for (var i = 0; i < _meds.length; i++) ...[
-              _MedicationEditor(
-                index: i,
-                row: _meds[i],
-                onRemove: _meds.length > 1
-                    ? () {
-                        setState(() {
-                          final r = _meds.removeAt(i);
-                          r.dispose();
-                        });
-                      }
-                    : null,
+            if (!_isAnalysisReport) ...[
+              Row(
+                children: [
+                  Text('Medications', style: Theme.of(context).textTheme.titleSmall),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () => setState(() => _meds.add(_MedRow())),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add row'),
+                  ),
+                ],
               ),
-              const Divider(height: 22),
+              for (var i = 0; i < _meds.length; i++) ...[
+                _MedicationEditor(
+                  index: i,
+                  row: _meds[i],
+                  onRemove: _meds.length > 1
+                      ? () {
+                          setState(() {
+                            final r = _meds.removeAt(i);
+                            r.dispose();
+                          });
+                        }
+                      : null,
+                ),
+                const Divider(height: 22),
+              ],
+            ] else ...[
+              Text(
+                'This upload is flagged as a report or lab listing — medications aren’t required.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.black54),
+              ),
+              const SizedBox(height: 12),
             ],
             FilledButton.icon(
               onPressed: _saving ? null : _save,

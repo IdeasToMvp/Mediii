@@ -64,6 +64,8 @@ class MediBuddyApi {
     String? extractionNotes,
     required List<Map<String, dynamic>> medications,
     Map<String, dynamic>? rawAnalysis,
+    String? documentKind,
+    Map<String, dynamic>? reportSummary,
   }) async {
     final uri = Uri.parse('$_base/api/prescriptions');
     final payload = <String, dynamic>{
@@ -78,6 +80,13 @@ class MediBuddyApi {
       'medications': medications,
       'raw_analysis': rawAnalysis,
     };
+    final dk = documentKind?.trim().toLowerCase();
+    if (dk != null && dk.isNotEmpty) {
+      payload['document_kind'] = dk;
+    }
+    if (reportSummary != null) {
+      payload['report_summary'] = reportSummary;
+    }
     final res = await http.post(
       uri,
       headers: {..._authHeaders, 'Content-Type': 'application/json'},
@@ -93,8 +102,11 @@ class MediBuddyApi {
     return decoded;
   }
 
-  Future<List<Map<String, dynamic>>> listPrescriptions() async {
-    final uri = Uri.parse('$_base/api/prescriptions');
+  Future<List<Map<String, dynamic>>> listPrescriptions({String? kind}) async {
+    var uri = Uri.parse('$_base/api/prescriptions');
+    if (kind != null && kind.trim().isNotEmpty) {
+      uri = uri.replace(queryParameters: {'kind': kind.trim().toLowerCase()});
+    }
     final res = await http.get(uri, headers: _authHeaders);
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw MediBuddyApiException(res.statusCode, res.body);
@@ -104,6 +116,172 @@ class MediBuddyApi {
       throw const FormatException('Unexpected list response');
     }
     return (decoded['prescriptions'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<Map<String, dynamic>> getPrescription(String id) async {
+    final uri = Uri.parse('$_base/api/prescriptions/$id');
+    final res = await http.get(uri, headers: _authHeaders);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected prescription response');
+    }
+    return decoded;
+  }
+
+  Future<Map<String, dynamic>> updatePrescription(String id, Map<String, dynamic> patch) async {
+    final uri = Uri.parse('$_base/api/prescriptions/$id');
+    final res = await http.patch(
+      uri,
+      headers: {..._authHeaders, 'Content-Type': 'application/json'},
+      body: jsonEncode(patch),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected update prescription response');
+    }
+    return decoded;
+  }
+
+  Future<void> deletePrescription(String id) async {
+    final uri = Uri.parse('$_base/api/prescriptions/$id');
+    final res = await http.delete(uri, headers: _authHeaders);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+  }
+
+  Future<Map<String, dynamic>> getMe() async {
+    final uri = Uri.parse('$_base/api/me');
+    final res = await http.get(uri, headers: _authHeaders);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected /api/me payload');
+    }
+    return decoded;
+  }
+
+  Future<List<Map<String, dynamic>>> fetchUpcomingMedicineOccurrences({int days = 3}) async {
+    final uri = Uri.parse('$_base/api/medicine-schedules/upcoming').replace(queryParameters: {
+      'days': '$days',
+    });
+    final res = await http.get(uri, headers: _authHeaders);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map || decoded['occurrences'] is! List) {
+      throw const FormatException('Unexpected upcoming meds payload');
+    }
+    return (decoded['occurrences'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<Map<String, dynamic>> listFamilyPayload() async {
+    final uri = Uri.parse('$_base/api/family-members');
+    final res = await http.get(uri, headers: _authHeaders);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected family-members payload');
+    }
+    return decoded;
+  }
+
+  Future<Map<String, dynamic>> createFamilyMember({
+    required String displayName,
+    String? relation,
+    int? birthYear,
+    String? notes,
+  }) async {
+    final uri = Uri.parse('$_base/api/family-members');
+    final bodyMap = <String, dynamic>{
+      'display_name': displayName,
+    };
+    final rel = relation?.trim();
+    if (rel != null && rel.isNotEmpty) {
+      bodyMap['relation'] = rel;
+    }
+    if (birthYear != null) {
+      bodyMap['birth_year'] = birthYear;
+    }
+    final nt = notes?.trim();
+    if (nt != null && nt.isNotEmpty) bodyMap['notes'] = nt;
+    final res = await http.post(
+      uri,
+      headers: {..._authHeaders, 'Content-Type': 'application/json'},
+      body: jsonEncode(bodyMap),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected create member response');
+    }
+    return decoded;
+  }
+
+  Future<Map<String, dynamic>> updateFamilyMember(
+    String id, {
+    String? displayName,
+    String? relation,
+    bool clearRelation = false,
+    int? birthYear,
+    bool clearBirthYear = false,
+    String? notes,
+    bool clearNotes = false,
+  }) async {
+    final uri = Uri.parse('$_base/api/family-members/$id');
+    final bodyMap = <String, dynamic>{};
+    if (displayName != null) bodyMap['display_name'] = displayName;
+    if (clearRelation) {
+      bodyMap['relation'] = null;
+    } else if (relation != null) {
+      final rel = relation.trim();
+      bodyMap['relation'] = rel.isEmpty ? null : rel;
+    }
+    if (clearBirthYear) {
+      bodyMap['birth_year'] = null;
+    } else if (birthYear != null) {
+      bodyMap['birth_year'] = birthYear;
+    }
+    if (clearNotes) {
+      bodyMap['notes'] = null;
+    } else if (notes != null) {
+      final n = notes.trim();
+      bodyMap['notes'] = n.isEmpty ? null : n;
+    }
+    final res = await http.patch(
+      uri,
+      headers: {..._authHeaders, 'Content-Type': 'application/json'},
+      body: jsonEncode(bodyMap),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected update member response');
+    }
+    return decoded;
+  }
+
+  Future<void> deleteFamilyMember(String id) async {
+    final uri = Uri.parse('$_base/api/family-members/$id');
+    final res = await http.delete(uri, headers: _authHeaders);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
   }
 
   String? _emptyToNull(String? v) {

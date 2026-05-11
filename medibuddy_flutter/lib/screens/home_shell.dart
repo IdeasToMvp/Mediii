@@ -6,7 +6,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/prescription.dart';
 import '../services/medibuddy_api.dart';
+import '../theme/medisathi_colors.dart';
+import '../widgets/family_member_bottom_sheet.dart';
 import 'add_prescription_manual_screen.dart';
+import 'dashboard_home_screen.dart';
 import 'login_screen.dart';
 import 'upload_prescription_screen.dart';
 
@@ -26,6 +29,34 @@ class HomeShell extends StatelessWidget {
   }
 }
 
+class _HomeSnapshot {
+  _HomeSnapshot({
+    required this.me,
+    required this.occurrences,
+    required this.familyMembers,
+    required this.prescriptions,
+    required this.reports,
+  });
+
+  final Map<String, dynamic>? me;
+  final List<Map<String, dynamic>> occurrences;
+  final List<Map<String, dynamic>> familyMembers;
+  final List<Prescription> prescriptions;
+  final List<Prescription> reports;
+
+  String displayName([String? emailFallback]) {
+    final p = me?['profile'];
+    final dn =
+        (p is Map && p['display_name'] != null) ?
+            p['display_name'].toString().trim()
+        : '';
+    if (dn.isNotEmpty) return dn;
+    final em = emailFallback ?? '';
+    if (em.contains('@')) return em.split('@').first;
+    return 'Friend';
+  }
+}
+
 class _HomeAuthenticated extends StatefulWidget {
   const _HomeAuthenticated();
 
@@ -35,21 +66,44 @@ class _HomeAuthenticated extends StatefulWidget {
 
 class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
   final _api = MediBuddyApi();
-  Future<List<Map<String, dynamic>>>? _future;
 
-  Future<void> _reload() async {
-    setState(() {
-      _future = _api.listPrescriptions();
-    });
-    await _future;
-    if (!mounted) return;
-    setState(() {});
+  Future<_HomeSnapshot>? _future;
+  int _tabIndex = 0;
+
+  Future<_HomeSnapshot> _load() async {
+    final meRaw = await _api.getMe();
+    final occurrences = await _api.fetchUpcomingMedicineOccurrences(days: 3);
+    final famWrap = await _api.listFamilyPayload();
+    final famList =
+        famWrap['members'] is List ?
+            (famWrap['members'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList()
+        : <Map<String, dynamic>>[];
+    final rxMaps = await _api.listPrescriptions(kind: 'prescription');
+    final repMaps = await _api.listPrescriptions(kind: 'report');
+
+    return _HomeSnapshot(
+      me: meRaw,
+      occurrences: occurrences,
+      familyMembers: famList,
+      prescriptions: rxMaps.map(Prescription.fromJson).toList(),
+      reports: repMaps.map(Prescription.fromJson).toList(),
+    );
   }
 
   @override
   void initState() {
     super.initState();
-    _future = _api.listPrescriptions();
+    _future = _load();
+  }
+
+  Future<void> _reload() async {
+    final reloadFuture = _load();
+    if (!mounted) return;
+    setState(() {
+      _future = reloadFuture;
+    });
+    await reloadFuture;
+    if (mounted) setState(() {});
   }
 
   Future<void> _signOut() async {
@@ -60,199 +114,34 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const AddPrescriptionManualScreen()),
     );
-    if (saved == true && mounted) {
-      await _reload();
-    }
+    if (saved == true && mounted) await _reload();
   }
 
   Future<void> _openUpload() async {
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const UploadPrescriptionScreen()),
     );
-    if (saved == true && mounted) {
-      await _reload();
-    }
+    if (saved == true && mounted) await _reload();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final userEmail = Supabase.instance.client.auth.currentUser?.email;
+  Future<void> _promptAddFamily() async {
+    final draft = await showFamilyMemberEditorSheet(context);
+    if (draft == null || !mounted) return;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('MediSathi'),
-        actions: [
-          IconButton(onPressed: _reload, tooltip: 'Refresh', icon: const Icon(Icons.refresh)),
-          PopupMenuButton<String>(
-            tooltip: 'Menu',
-            onSelected: (v) async {
-              if (v == 'logout') await _signOut();
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'logout', child: Text('Sign out')),
-            ],
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: _reload,
-        child: FutureBuilder<List<Map<String, dynamic>>>(
-          future: _future,
-          builder: (context, snap) {
-            if (snap.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snap.hasError) {
-              final err = snap.error!;
-              return ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                children: [
-                  Text('Could not load prescriptions.', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Text(_shortNetworkError(err), style: Theme.of(context).textTheme.bodyMedium),
-                  const SizedBox(height: 12),
-                  FilledButton(onPressed: _reload, child: const Text('Try again')),
-                ],
-              );
-            }
-            final rows = snap.data ?? [];
-            if (rows.isEmpty) {
-              return ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (userEmail != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Text(
-                        'Signed in as $userEmail',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ),
-                  Text(
-                    'No prescriptions yet',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Add one manually or upload a prescription image — the Node API analyzes it using OpenAI, then saves it to Supabase.',
-                  ),
-                ],
-              );
-            }
-
-            final fmt = DateFormat.yMMMEd().add_jm();
-            return ListView.separated(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 92),
-              itemCount: rows.length + (userEmail == null ? 0 : 1),
-              separatorBuilder: (context, index) => const SizedBox(height: 10),
-              itemBuilder: (context, idx) {
-                if (userEmail != null && idx == 0) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text('Signed in as $userEmail', style: Theme.of(context).textTheme.bodySmall),
-                  );
-                }
-                final dataIdx = userEmail != null ? idx - 1 : idx;
-                final p = Prescription.fromJson(rows[dataIdx]);
-
-                final created = p.createdAt == null ? '—' : fmt.format(p.createdAt!.toLocal());
-                final title = (p.title != null && p.title!.trim().isNotEmpty)
-                    ? p.title!.trim()
-                    : (p.doctorName != null ? 'Rx · ${p.doctorName}' : 'Prescription');
-
-                return Card(
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () => _showDetail(context, p),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(title, style: Theme.of(context).textTheme.titleMedium),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.secondaryContainer,
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  p.source == 'analyzed' ? 'AI-assisted' : 'Manual',
-                                  style: Theme.of(context).textTheme.labelSmall,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text('Saved: $created', style: Theme.of(context).textTheme.bodySmall),
-                          const SizedBox(height: 10),
-                          Text(
-                            p.medications.isEmpty ? 'Medications: —' : 'Medications: ${p.medications.length}',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                          if ((p.generalInstructions ?? '').trim().isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              p.generalInstructions!.trim(),
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final choice = await showModalBottomSheet<String>(
-            context: context,
-            showDragHandle: true,
-            builder: (context) => SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.edit_note_outlined),
-                    title: const Text('Manual entry'),
-                    subtitle: const Text('Type medication lines yourself'),
-                    onTap: () => Navigator.pop(context, 'manual'),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.document_scanner_outlined),
-                    title: const Text('Upload & analyze'),
-                    subtitle: const Text('Photo → OpenAI → review → save'),
-                    onTap: () => Navigator.pop(context, 'upload'),
-                  ),
-                  const SizedBox(height: 6),
-                ],
-              ),
-            ),
-          );
-          if (!mounted || choice == null) return;
-          if (choice == 'manual') {
-            await _openAddManual();
-          } else {
-            await _openUpload();
-          }
-        },
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Add'),
-      ),
-    );
+    try {
+      await _api.createFamilyMember(
+        displayName: draft.displayName,
+        relation: draft.relation,
+        birthYear: draft.birthYear,
+        notes: draft.notes,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Family member added.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not add: ${_shortNetworkError(e)}')));
+    }
+    await _reload();
   }
 
   static String _shortNetworkError(Object e) {
@@ -266,13 +155,118 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     return e.toString();
   }
 
+  Future<void> _openEditPrescription(Prescription p) async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => AddPrescriptionManualScreen(prescriptionId: p.id)),
+    );
+    if (saved == true && mounted) await _reload();
+  }
+
+  Future<void> _deletePrescriptionAfterConfirm(Prescription p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete record?'),
+        content: Text(
+          p.isReport
+              ? 'This report will be removed permanently.'
+              : 'This prescription and its generated reminder links will be removed.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Theme.of(ctx).colorScheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _api.deletePrescription(p.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deleted.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete: ${_shortNetworkError(e)}')));
+    }
+    await _reload();
+  }
+
+  Future<void> _promptEditFamily(Map<String, dynamic> member) async {
+    final id = member['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+
+    final draft = await showFamilyMemberEditorSheet(context, initial: FamilyMemberDraft.fromApiRow(member));
+    if (draft == null || !mounted) return;
+
+    try {
+      await _api.updateFamilyMember(
+        id,
+        displayName: draft.displayName,
+        relation: draft.relation,
+        clearRelation: draft.clearRelation,
+        birthYear: draft.birthYear,
+        clearBirthYear: draft.clearBirthYear,
+        notes: draft.notes,
+        clearNotes: draft.clearNotes,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Family member updated.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not update: ${_shortNetworkError(e)}')));
+    }
+    await _reload();
+  }
+
+  Future<void> _deleteFamilyMemberAfterConfirm(Map<String, dynamic> member) async {
+    final id = member['id']?.toString() ?? '';
+    final label = (member['display_name'] ?? '').toString();
+    if (id.isEmpty) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove family member?'),
+        content: Text(label.isEmpty ? 'This profile will be removed.' : 'Remove $label from your household?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Theme.of(ctx).colorScheme.error),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _api.deleteFamilyMember(id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Family member removed.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not remove: ${_shortNetworkError(e)}')));
+    }
+    await _reload();
+  }
+
   Future<void> _showDetail(BuildContext context, Prescription p) async {
     final buffer = StringBuffer();
+    buffer.writeln('Kind: ${p.documentKind ?? 'prescription'}');
     buffer.writeln(p.patientName != null ? 'Patient: ${p.patientName}' : 'Patient: —');
+    buffer.writeln(p.patientFamilyMemberId != null ? 'Linked family member id: ${p.patientFamilyMemberId}' : 'Linked family member id: —');
     buffer.writeln(p.doctorName != null ? 'Doctor: ${p.doctorName}' : 'Doctor: —');
     buffer.writeln(p.prescriptionDate != null ? 'Date: ${p.prescriptionDate}' : 'Date: —');
     buffer.writeln(p.diagnosis != null ? 'Diagnosis: ${p.diagnosis}' : 'Diagnosis: —');
     buffer.writeln();
+    if (p.isReport && p.reportSummary != null && p.reportSummary!.isNotEmpty) {
+      buffer.writeln('Report summary (JSON)');
+      buffer.writeln(const JsonEncoder.withIndent('  ').convert(p.reportSummary));
+      buffer.writeln();
+    }
     buffer.writeln('Medications');
     var i = 1;
     for (final med in p.medications) {
@@ -297,13 +291,302 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Prescription detail'),
+          title: Text(p.isReport ? 'Report detail' : 'Prescription detail'),
           content: SingleChildScrollView(child: SelectableText(buffer.toString())),
-          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close')),
+            if (!p.isReport)
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _openEditPrescription(p);
+                },
+                child: const Text('Edit'),
+              ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                await _deletePrescriptionAfterConfirm(p);
+              },
+              style: TextButton.styleFrom(foregroundColor: Theme.of(dialogContext).colorScheme.error),
+              child: const Text('Delete'),
+            ),
+          ],
         );
       },
+    );
+  }
+
+  Future<void> _pickAddFlow() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_note_outlined),
+              title: const Text('Manual entry'),
+              subtitle: const Text('Type medication lines yourself'),
+              onTap: () => Navigator.pop(context, 'manual'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.document_scanner_outlined),
+              title: const Text('Upload & analyze'),
+              subtitle: const Text('Photo → AI classify → prescription or report → save'),
+              onTap: () => Navigator.pop(context, 'upload'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'manual') {
+      await _openAddManual();
+    } else {
+      await _openUpload();
+    }
+  }
+
+  Widget _occurrencesPane(_HomeSnapshot snap) {
+    final fmt = DateFormat.yMMMd().add_jm();
+    final occ = snap.occurrences;
+    if (occ.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            'No upcoming doses.\nGenerate schedules from a prescription (`POST /api/medicine-schedules/from-prescription`) or create them manually.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.black54),
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      itemCount: occ.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 10),
+      itemBuilder: (context, idx) {
+        final m = occ[idx];
+        final when = DateTime.tryParse((m['due_at_iso'] ?? '').toString());
+        final s = when == null ? '—' : fmt.format(when.toLocal());
+
+        return Card(
+          child: ListTile(
+            leading: CircleAvatar(backgroundColor: MediSathiColors.brandBlue.withValues(alpha: 0.12), child: const Icon(Icons.alarm_rounded)),
+            title: Text(m['medication_name']?.toString() ?? 'Medicine', style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text([
+              if ((m['dosage_text'] ?? '').toString().trim().isNotEmpty) m['dosage_text'].toString(),
+              if ((m['meal_instruction'] ?? '').toString().trim().isNotEmpty) m['meal_instruction'].toString(),
+            ].join(' · ')),
+            trailing: Text(s, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _profilePane(_HomeSnapshot snap) {
+    final plan = snap.me?['plan'];
+    final budget = plan is Map ? plan['ai_budget'] : null;
+
+    final planName = plan is Map ? plan['display_name']?.toString() ?? '' : '';
+
+    final used =
+        budget is Map ?
+            '${budget['used']}'
+        : '—';
+    final lim =
+        budget is Map ?
+            budget['monthly_limit'] == null ?
+                '∞'
+            : '${budget['monthly_limit']}'
+        : '—';
+
+    final famSlots = plan is Map ? plan['family_slots_used']?.toString() ?? '—' : '—';
+    final famCap =
+        plan is Map ?
+          plan['max_family_members'] == null ?
+              '∞'
+          : '${plan['max_family_members']}'
+        : '—';
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 32),
+      children: [
+        Text('Plan', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Text(planName.isEmpty ? 'Freemium' : planName),
+        ListTile(contentPadding: EdgeInsets.zero, title: const Text('AI extractions (this period)'), trailing: Text('$used / $lim')),
+        ListTile(contentPadding: EdgeInsets.zero, title: const Text('Family slots'), trailing: Text('$famSlots / $famCap')),
+        const Divider(height: 32),
+        FilledButton.tonal(onPressed: _signOut, child: const Text('Sign out')),
+      ],
+    );
+  }
+
+  Widget _placeholder(String title, String body, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.all(28),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 48, color: Colors.black26),
+          const SizedBox(height: 16),
+          Text(title, textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 12),
+          Text(body, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.black54)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final userEmail = Supabase.instance.client.auth.currentUser?.email;
+
+    return Scaffold(
+      body: FutureBuilder<_HomeSnapshot>(
+        future: _future,
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (snap.hasError) {
+            final err = snap.error!;
+            return Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('Could not load dashboard data.', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Text(_shortNetworkError(err), style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height: 14),
+                  FilledButton(onPressed: _reload, child: const Text('Retry')),
+                  if (userEmail != null) ...[
+                    const SizedBox(height: 28),
+                    Text('Signed in as $userEmail', style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ],
+              ),
+            );
+          }
+
+          final data = snap.data!;
+          final latestReport = data.reports.isEmpty ? null : data.reports.first;
+          final displayName = data.displayName(userEmail);
+
+          return IndexedStack(
+            index: _tabIndex,
+            children: [
+              DashboardHomeScreen(
+                displayName: displayName,
+                notificationsEnabled: true,
+                upcomingMedicines: data.occurrences,
+                familyMembers: data.familyMembers,
+                recentPrescriptions: data.prescriptions,
+                latestReport: latestReport,
+                onRefresh: _reload,
+                onViewScheduleTap: () => setState(() => _tabIndex = 3),
+                onAddFamilyTap: _promptAddFamily,
+                onEditFamilyMember: _promptEditFamily,
+                onDeleteFamilyMember: _deleteFamilyMemberAfterConfirm,
+                onSearchFocusTap: () => setState(() => _tabIndex = 1),
+                onRecentPrescriptionTap: (p) => _showDetail(context, p),
+                onEditPrescription: _openEditPrescription,
+                onDeletePrescription: _deletePrescriptionAfterConfirm,
+              ),
+              Column(
+                children: [
+                  const SafeArea(bottom: false, child: SizedBox(height: 8)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Row(
+                      children: [
+                        IconButton(onPressed: () => setState(() => _tabIndex = 0), icon: const Icon(Icons.arrow_back_ios_new_rounded)),
+                        Text('Search', style: Theme.of(context).textTheme.titleLarge),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: _placeholder(
+                      'Search is coming soon',
+                      'Behind the scenes, records are searchable via prescriptions + document_kind segregation.',
+                      Icons.search_rounded,
+                    ),
+                  ),
+                ],
+              ),
+              Column(
+                children: [
+                  const SafeArea(bottom: false, child: SizedBox(height: 8)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Row(
+                      children: [
+                        IconButton(onPressed: () => setState(() => _tabIndex = 0), icon: const Icon(Icons.arrow_back_ios_new_rounded)),
+                        Text('Upload', style: Theme.of(context).textTheme.titleLarge),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(28),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            FilledButton.icon(
+                              onPressed: _pickAddFlow,
+                              icon: const Icon(Icons.add_photo_alternate_rounded),
+                              label: const Text('Add prescription or report'),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'We distinguish prescriptions vs diagnostics before saving.',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Scaffold(
+                appBar: AppBar(title: const Text('Medicine reminders')),
+                body: _occurrencesPane(data),
+              ),
+              Scaffold(
+                appBar: AppBar(title: const Text('Profile')),
+                body: RefreshIndicator(onRefresh: _reload, child: _profilePane(data)),
+              ),
+            ],
+          );
+        },
+      ),
+      floatingActionButton: _tabIndex == 0 ?
+          FloatingActionButton.extended(onPressed: _pickAddFlow, icon: const Icon(Icons.add_rounded), label: const Text('Add'))
+      : null,
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tabIndex.clamp(0, 4),
+        onDestinationSelected: (idx) => setState(() => _tabIndex = idx),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'HOME'),
+          NavigationDestination(icon: Icon(Icons.search_outlined), label: 'SEARCH'),
+          NavigationDestination(icon: Icon(Icons.add_circle_outline), label: 'UPLOAD'),
+          NavigationDestination(icon: Icon(Icons.schedule_outlined), label: 'REMINDERS'),
+          NavigationDestination(icon: Icon(Icons.person_outline), label: 'PROFILE'),
+        ],
+      ),
     );
   }
 }
