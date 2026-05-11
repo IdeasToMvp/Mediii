@@ -223,6 +223,65 @@ class MediBuddyApi {
     return decoded;
   }
 
+  Future<Map<String, dynamic>> getRazorpayConfig() async {
+    final uri = Uri.parse('$_base/api/billing/razorpay/config');
+    final res = await http.get(uri, headers: _authHeaders);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected Razorpay config response');
+    }
+    return decoded;
+  }
+
+  /// Creates a Razorpay subscription for **Pro** (`plan_slug: pro`).
+  ///
+  /// [billingInterval]: `monthly` or `annual` (maps to `RAZORPAY_PLAN_ID_PRO_MONTHLY` / `_ANNUAL` on the server).
+  Future<Map<String, dynamic>> createRazorpaySubscription({
+    required String planSlug,
+    bool customerNotify = true,
+    String billingInterval = 'monthly',
+  }) async {
+    final uri = Uri.parse('$_base/api/billing/razorpay/create-subscription');
+    final res = await http.post(
+      uri,
+      headers: {..._authHeaders, 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'plan_slug': planSlug,
+        'customer_notify': customerNotify,
+        'billing_interval': billingInterval,
+      }),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected create-subscription response');
+    }
+    return decoded;
+  }
+
+  /// After Checkout success: apply subscription to Supabase immediately (before webhooks arrive).
+  Future<Map<String, dynamic>> syncRazorpaySubscription({required String subscriptionId}) async {
+    final uri = Uri.parse('$_base/api/billing/razorpay/sync-subscription');
+    final res = await http.post(
+      uri,
+      headers: {..._authHeaders, 'Content-Type': 'application/json'},
+      body: jsonEncode({'subscription_id': subscriptionId}),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected sync-subscription response');
+    }
+    return decoded;
+  }
+
   Future<List<Map<String, dynamic>>> fetchUpcomingMedicineOccurrences({int days = 3}) async {
     final uri = Uri.parse('$_base/api/medicine-schedules/upcoming').replace(queryParameters: {
       'days': '$days',

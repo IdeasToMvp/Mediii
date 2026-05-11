@@ -31,6 +31,38 @@
 
   <title>MediSathi</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Razorpay Standard Checkout: required for subscription pay on web (hosted short_url often shows "Hosted page is not available"). -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script>
+    function openRazorpaySubscriptionCheckout(optionsJson) {
+      try {
+        var o = JSON.parse(optionsJson);
+        var rzp = new Razorpay({
+          key: o.key,
+          subscription_id: o.subscription_id,
+          name: o.name || 'MediSathi',
+          description: o.description || 'Pro subscription',
+          prefill: o.prefill || {},
+          handler: function (response) {
+            window.dispatchEvent(new CustomEvent('razorpay-success', { detail: JSON.stringify(response) }));
+          },
+          modal: {
+            ondismiss: function () {
+              window.dispatchEvent(new CustomEvent('razorpay-dismiss'));
+            }
+          }
+        });
+        rzp.on('payment.failed', function (resp) {
+          var err = (resp && resp.error) ? resp.error : resp;
+          window.dispatchEvent(new CustomEvent('razorpay-failed', { detail: JSON.stringify(err || {}) }));
+        });
+        rzp.open();
+      } catch (e) {
+        window.dispatchEvent(new CustomEvent('razorpay-failed', { detail: JSON.stringify({ description: String(e) }) }));
+      }
+    }
+  </script>
 </head>
 <body>
   <!--

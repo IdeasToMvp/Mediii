@@ -518,7 +518,7 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
             FilledButton.tonalIcon(
               onPressed: _showPaidPickerSheet,
               icon: const Icon(Icons.add_photo_alternate_outlined),
-              label: const Text('Choose files (Plus / Pro)'),
+              label: const Text('Choose files (Pro)'),
             ),
             const SizedBox(height: 10),
             Row(

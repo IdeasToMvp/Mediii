@@ -10,6 +10,16 @@ import { analyzeMedicalDocumentImage } from "./openaiMedicalDocument.js";
 import { flattenUpcomingFromRows } from "./medicineExpansion.js";
 import { buildMedicineScheduleInserts, addDaysToIso } from "./medicineSynth.js";
 import { resolvePatientFamilyMember } from "./patientFamilyResolve.js";
+import {
+  applySubscriptionToEntitlements,
+  createRazorpayCustomerOrReuse,
+  describeRazorpayThrown,
+  getRazorpay,
+  getRazorpayPlanId,
+  getSupabaseAdmin,
+  handleRazorpayWebhook,
+  normalizeBillingInterval,
+} from "./razorpayBilling.js";
 
 const PORT = Number(process.env.PORT) || 3200;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -34,6 +44,10 @@ const upload = multer({
 
 const app = express();
 app.use(cors());
+
+/** Razorpay must verify HMAC against the raw request body (before express.json). */
+app.post("/api/billing/razorpay/webhook", express.raw({ type: "application/json", limit: "2mb" }), handleRazorpayWebhook);
+
 app.use(express.json({ limit: "2mb" }));
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -180,7 +194,7 @@ function planSlugFromPeek(peek) {
 function mimeAllowedMedicalUpload(planSlug, mimeRaw) {
   const mime = (mimeRaw || "").toLowerCase();
   if (/^image\/(jpeg|png|webp|gif)$/.test(mime)) return true;
-  const paid = planSlug === "plus" || planSlug === "pro";
+  const paid = planSlug === "pro";
   return paid && mime === "application/pdf";
 }
 
@@ -209,9 +223,8 @@ app.get("/api/me", requireUser, async (req, res) => {
     const { data: profile } = await req.supabase.from("user_profiles").select("*").maybeSingle();
 
     await req.supabase.rpc("sync_ai_usage_month");
-    const budget = await peekAiExtractionsBudget(req.supabase);
 
-    const { data: ue } = await req.supabase.from("user_entitlements").select("*").maybeSingle();
+    let { data: ue } = await req.supabase.from("user_entitlements").select("*").maybeSingle();
 
     let planMeta = null;
     if (ue?.plan_slug) {
@@ -219,9 +232,19 @@ app.get("/api/me", requireUser, async (req, res) => {
       planMeta = pm;
     }
 
+    const { monthly_ai_extractions: _aiCapInternal, ...planRest } = planMeta && typeof planMeta === "object" ? planMeta : {};
+
     const { count: fmCount /* family members */ } = await req.supabase
       .from("family_members")
       .select("id", { count: "exact", head: true });
+
+    const entitlementPublic =
+      ue && typeof ue === "object" ?
+        (() => {
+          const { ai_extractions_used: _usage, ...rest } = ue;
+          return rest;
+        })()
+      : null;
 
     res.json({
       user: {
@@ -229,23 +252,19 @@ app.get("/api/me", requireUser, async (req, res) => {
         email: req.user.email,
       },
       profile: profile ?? null,
-      entitlement: ue ?? null,
+      entitlement: entitlementPublic,
       plan:
         planMeta ?
           {
-            ...planMeta,
-            ai_budget: {
-              unlimited: budget.unlimited === true,
-              used: budget.used,
-              monthly_limit: budget.limit,
-            },
+            ...planRest,
+            pro_access_until: ue?.razorpay_pro_access_until ?? null,
             family_slots_used: fmCount ?? 0,
             upload_caps: {
               max_bytes: UPLOAD_MAX_BYTES,
-              allows_multi_pick: ue?.plan_slug === "plus" || ue?.plan_slug === "pro",
-              allows_pdf: ue?.plan_slug === "plus" || ue?.plan_slug === "pro",
+              allows_multi_pick: ue?.plan_slug === "pro",
+              allows_pdf: ue?.plan_slug === "pro",
               image_types: "JPEG, PNG, WebP, GIF",
-              paid_label: "Plus / Pro",
+              paid_label: "Pro",
             },
           }
         : null,
@@ -333,9 +352,171 @@ app.get("/api/subscription/plans", requireUser, async (req, res) => {
   res.json({ plans: data || [] });
 });
 
+/** Public key + defaults for Razorpay Checkout (subscriptions). */
+app.get("/api/billing/razorpay/config", requireUser, (req, res) => {
+  const keyId = process.env.RAZORPAY_KEY_ID?.trim();
+  if (!keyId) {
+    res.status(503).json({ error: "Razorpay is not configured (RAZORPAY_KEY_ID)" });
+    return;
+  }
+  const currency = process.env.RAZORPAY_CURRENCY?.trim() || "INR";
+  res.json({ key_id: keyId, currency });
+});
+
+/**
+ * Creates a Razorpay customer (stored on entitlements) and subscription with notes for webhooks.
+ * Client opens Checkout with `key_id` + `subscription_id`.
+ */
+app.post("/api/billing/razorpay/create-subscription", requireUser, async (req, res) => {
+  try {
+    const rzp = getRazorpay();
+    const admin = getSupabaseAdmin();
+    if (!rzp) {
+      res.status(503).json({ error: "Razorpay is not configured (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET)" });
+      return;
+    }
+    if (!admin) {
+      res.status(503).json({
+        error:
+          "Server billing requires SUPABASE_SERVICE_ROLE_KEY (store Razorpay customer id + process webhooks)",
+      });
+      return;
+    }
+
+    await bootstrapUserContext(req.supabase, req.user);
+
+    const planSlug = String(req.body?.plan_slug || "")
+      .trim()
+      .toLowerCase();
+    if (planSlug !== "pro") {
+      res.status(400).json({ error: "plan_slug must be pro" });
+      return;
+    }
+
+    const billingInterval = normalizeBillingInterval(req.body?.billing_interval);
+
+    const planId = getRazorpayPlanId(planSlug, billingInterval);
+    if (!planId) {
+      res.status(503).json({
+        error:
+          billingInterval === "annual" ?
+            "Annual Pro plan id missing — set RAZORPAY_PLAN_ID_PRO_ANNUAL in environment"
+          : "Monthly Pro plan id missing — set RAZORPAY_PLAN_ID_PRO_MONTHLY (or legacy RAZORPAY_PLAN_ID_PRO) in environment",
+      });
+      return;
+    }
+
+    const { data: ent } = await req.supabase.from("user_entitlements").select("*").maybeSingle();
+    const { data: prof } = await req.supabase.from("user_profiles").select("display_name").maybeSingle();
+
+    const customerNotify = req.body?.customer_notify !== false;
+
+    let customerId = typeof ent?.razorpay_customer_id === "string" ? ent.razorpay_customer_id.trim() : "";
+    if (!customerId) {
+      const displayName =
+        typeof prof?.display_name === "string" && prof.display_name.trim() ?
+          prof.display_name.trim()
+        : inferDisplayName(req.user);
+      const email = typeof req.user.email === "string" ? req.user.email.trim() : "";
+
+      const customerIdResolved = await createRazorpayCustomerOrReuse(rzp, {
+        name: displayName,
+        email,
+        supabaseUserId: req.user.id,
+      });
+      customerId = customerIdResolved;
+
+      const { error: custErr } = await admin
+        .from("user_entitlements")
+        .update({ razorpay_customer_id: customerId, updated_at: new Date().toISOString() })
+        .eq("user_id", req.user.id);
+      if (custErr) {
+        console.error(custErr);
+        throw new Error(custErr.message);
+      }
+    }
+
+    const totalCount = Number.parseInt(process.env.RAZORPAY_SUBSCRIPTION_TOTAL_COUNT || "120", 10);
+
+    const sub = await rzp.subscriptions.create({
+      plan_id: planId,
+      customer_id: customerId,
+      total_count: Number.isFinite(totalCount) && totalCount > 0 ? totalCount : 120,
+      customer_notify: customerNotify ? 1 : 0,
+      notes: {
+        supabase_user_id: String(req.user.id),
+        plan_slug: String(planSlug),
+        billing_interval: String(billingInterval),
+      },
+    });
+
+    res.json({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      subscription_id: sub.id,
+      short_url: sub.short_url || null,
+      status: sub.status,
+    });
+  } catch (e) {
+    const d = describeRazorpayThrown(e);
+    console.error("create-subscription failed", d.kind, d.description, d.raw);
+    if (d.kind === "razorpay") {
+      res.status(502).json({
+        error: "razorpay_error",
+        detail: d.description,
+        code: d.code,
+        source: d.source,
+        statusCode: d.statusCode,
+      });
+      return;
+    }
+    res.status(500).json({ error: d.description || "create_subscription_failed" });
+  }
+});
+
+/**
+ * Pull subscription from Razorpay and apply to entitlements. Call after Checkout success when webhooks lag (local dev or cold start).
+ */
+app.post("/api/billing/razorpay/sync-subscription", requireUser, async (req, res) => {
+  try {
+    const rzp = getRazorpay();
+    if (!rzp) {
+      res.status(503).json({ error: "Razorpay is not configured" });
+      return;
+    }
+
+    const subId = String(req.body?.subscription_id || "").trim();
+    if (!subId.startsWith("sub_")) {
+      res.status(400).json({ error: "subscription_id must be a Razorpay subscription id (sub_…)" });
+      return;
+    }
+
+    let entity;
+    try {
+      entity = await rzp.subscriptions.fetch(subId);
+    } catch (e) {
+      const d = describeRazorpayThrown(e);
+      res.status(502).json({ error: "razorpay_error", detail: d.description });
+      return;
+    }
+
+    const notes = entity?.notes && typeof entity.notes === "object" ? entity.notes : {};
+    const noteUid = typeof notes.supabase_user_id === "string" ? notes.supabase_user_id.trim() : "";
+    if (!noteUid || noteUid !== req.user.id) {
+      res.status(403).json({ error: "Subscription does not belong to this account." });
+      return;
+    }
+
+    const result = await applySubscriptionToEntitlements(entity);
+    res.json({ ok: true, result });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 /**
  * Persist original bytes to private storage ({user_id}/{uuid}.ext).
- * Free: images only (jpeg, png, webp, gif). Paid (plus/pro): also application/pdf.
+ * Free: images only (jpeg, png, webp, gif). Pro: also application/pdf.
  */
 app.post("/api/prescriptions/upload-source", requireUser, upload.single("file"), async (req, res) => {
   try {
@@ -353,7 +534,7 @@ app.post("/api/prescriptions/upload-source", requireUser, upload.single("file"),
       return res.status(400).json({
         error:
           planSlug === "free" ?
-            "Free plan accepts JPEG/PNG/WebP/GIF only. Plus or Pro can also upload PDFs."
+            "Free plan accepts JPEG/PNG/WebP/GIF only. Pro can also upload PDFs."
           : "Unsupported file type. Allowed: jpeg, png, webp, gif, pdf.",
         plan_slug: planSlug,
         max_bytes: UPLOAD_MAX_BYTES,
@@ -401,7 +582,7 @@ app.post("/api/prescriptions/upload-source", requireUser, upload.single("file"),
       allowed_notice:
         planSlug === "free" ?
           "Free: one image at a time · JPEG/PNG/WebP/GIF · max 10 MB. AI analyzes photos."
-        : "Plus/Pro: multi-select images · PDF uploads · images + PDF · max 10 MB per file. AI analyzes photo images.",
+        : "Pro: multi-select images · PDF uploads · images + PDF · max 10 MB per file. AI analyzes photo images.",
     });
   } catch (e) {
     console.error(e);

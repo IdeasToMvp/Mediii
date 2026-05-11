@@ -500,6 +500,9 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                     userEmail: userEmail,
                     profile: data.me?['profile'] as Map<String, dynamic>?,
                     plan: data.me?['plan'] as Map<String, dynamic>?,
+                    medibuddyApi: _api,
+                    planSlug: planSlug,
+                    onSubscriptionUpdated: _reload,
                     onSignOut: _signOut,
                     onEditAccount: () async {
                       final ok = await Navigator.of(context).push<bool>(

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../app_theme_scope.dart';
+import '../services/medibuddy_api.dart';
 import '../theme/medisathi_colors.dart';
+import '../widgets/plan_billing_sheet.dart';
 import 'edit_profile_screen.dart' show kGenderLabels;
 
 String _initials(String name) {
@@ -32,6 +34,9 @@ class ProfileTab extends StatelessWidget {
     required this.userEmail,
     required this.profile,
     required this.plan,
+    required this.medibuddyApi,
+    required this.planSlug,
+    required this.onSubscriptionUpdated,
     required this.onSignOut,
     required this.onEditAccount,
     this.versionLabel = 'v1.0.0',
@@ -41,6 +46,9 @@ class ProfileTab extends StatelessWidget {
   final String? userEmail;
   final Map<String, dynamic>? profile;
   final Map<String, dynamic>? plan;
+  final MediBuddyApi medibuddyApi;
+  final String planSlug;
+  final Future<void> Function() onSubscriptionUpdated;
   final VoidCallback onSignOut;
   final VoidCallback onEditAccount;
   final String versionLabel;
@@ -60,14 +68,6 @@ class ProfileTab extends StatelessWidget {
     ].whereType<String>().toList();
 
     final planName = plan is Map ? (plan!['display_name']?.toString() ?? '').trim() : '';
-    final budget = plan is Map ? plan!['ai_budget'] : null;
-    final used = budget is Map ? '${budget['used']}' : '—';
-    final lim =
-        budget is Map ?
-            budget['monthly_limit'] == null ?
-                '∞'
-            : '${budget['monthly_limit']}'
-        : '—';
     final famSlots = plan is Map ? plan!['family_slots_used']?.toString() ?? '—' : '—';
     final famCap =
         plan is Map ?
@@ -162,7 +162,7 @@ class ProfileTab extends StatelessWidget {
                   iconColor: const Color(0xFF0369A1),
                   title: 'Subscription & plan',
                   subtitle: planName.isEmpty ? 'Free' : planName,
-                  onTap: () => _showPlanSheet(context, planName, used, lim, famSlots, famCap),
+                  onTap: () => _showPlanSheet(context, planName, famSlots, famCap),
                 ),
                 const Divider(height: 1),
                 _SettingsRow(
@@ -259,36 +259,21 @@ class ProfileTab extends StatelessWidget {
   void _showPlanSheet(
     BuildContext context,
     String planLabel,
-    String used,
-    String lim,
     String famSlots,
     String famCap,
   ) {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Your plan', style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 12),
-            Text(planLabel.isEmpty ? 'Free' : planLabel, style: Theme.of(ctx).textTheme.bodyLarge),
-            const SizedBox(height: 16),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('AI extractions (this period)'),
-              trailing: Text('$used / $lim', style: const TextStyle(fontWeight: FontWeight.w600)),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Family slots'),
-              trailing: Text('$famSlots / $famCap', style: const TextStyle(fontWeight: FontWeight.w600)),
-            ),
-          ],
-        ),
+      isScrollControlled: true,
+      builder: (ctx) => PlanBillingSheet(
+        planLabel: planLabel,
+        famSlots: famSlots,
+        famCap: famCap,
+        api: medibuddyApi,
+        currentPlanSlug: planSlug,
+        userEmail: userEmail,
+        onPurchased: onSubscriptionUpdated,
       ),
     );
   }

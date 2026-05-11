@@ -41,6 +41,50 @@ curl -sS "$API/api/subscription/plans" \
 
 ---
 
+### Razorpay subscriptions (mobile / hosted checkout)
+
+Set env vars in `backend/.env.example`, create **Plans** in Razorpay Dashboard, and point a **Webhook** to:
+
+`https://<your-api-host>/api/billing/razorpay/webhook`
+
+Use the webhook secret as **`RAZORPAY_WEBHOOK_SECRET`**. The server needs **`SUPABASE_SERVICE_ROLE_KEY`** so webhooks can update `user_entitlements`.
+
+**Checkout config** (publishable key and currency for the client):
+
+```bash
+curl -sS "$API/api/billing/razorpay/config" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Create subscription** (returns `key_id`, `subscription_id`, optional `short_url` for web):
+
+```bash
+# Monthly Pro (uses RAZORPAY_PLAN_ID_PRO_MONTHLY)
+curl -sS -X POST "$API/api/billing/razorpay/create-subscription" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"plan_slug":"pro","customer_notify":true,"billing_interval":"monthly"}'
+
+# Annual Pro (uses RAZORPAY_PLAN_ID_PRO_ANNUAL)
+curl -sS -X POST "$API/api/billing/razorpay/create-subscription" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"plan_slug":"pro","customer_notify":true,"billing_interval":"annual"}'
+```
+
+After payment, webhooks (or **`POST /api/billing/razorpay/sync-subscription`**) map the subscription to **`pro`** once Razorpay reports **`active`** or **`authenticated`**.
+
+**Sync immediately after Checkout** (when webhooks lag — e.g. localhost, or cold start):
+
+```bash
+curl -sS -X POST "$API/api/billing/razorpay/sync-subscription" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"subscription_id":"sub_xxxxxxxxxxxxxx"}'
+```
+
+---
+
 ### AI document extraction (classification: prescription vs report)
 
 Counts **one** AI extraction toward the caller’s monthly plan limit **after** successful model output.
