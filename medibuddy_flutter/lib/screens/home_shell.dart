@@ -7,10 +7,13 @@ import '../models/prescription.dart';
 import '../services/medibuddy_api.dart';
 import '../widgets/family_member_bottom_sheet.dart';
 import '../widgets/medisathi_loader.dart';
+import 'documents_library_tab.dart';
 import 'medicine_reminders_tab.dart';
 import 'add_prescription_manual_screen.dart';
 import 'dashboard_home_screen.dart';
+import 'edit_profile_screen.dart';
 import 'login_screen.dart';
+import 'profile_tab.dart';
 import 'upload_prescription_screen.dart';
 
 class HomeShell extends StatelessWidget {
@@ -110,6 +113,16 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     if (mounted) setState(() {});
   }
 
+  List<Prescription> _documentsSorted(_HomeSnapshot d) {
+    final all = [...d.prescriptions, ...d.reports];
+    all.sort((a, b) {
+      final ta = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final tb = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return tb.compareTo(ta);
+    });
+    return all;
+  }
+
   Future<void> _signOut() async {
     await Supabase.instance.client.auth.signOut();
   }
@@ -122,8 +135,17 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
   }
 
   Future<void> _openUpload() async {
+    var slug = 'free';
+    try {
+      final me = await _api.getMe();
+      final p = me['plan'];
+      if (p is Map && p['slug'] != null) {
+        slug = p['slug'].toString().trim().toLowerCase();
+      }
+    } catch (_) {}
+    if (!mounted) return;
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const UploadPrescriptionScreen()),
+      MaterialPageRoute(builder: (_) => UploadPrescriptionScreen(planSlug: slug)),
     );
     if (saved == true && mounted) await _reload();
   }
@@ -260,6 +282,14 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
   Future<void> _showDetail(BuildContext context, Prescription p) async {
     final buffer = StringBuffer();
     buffer.writeln('Kind: ${p.documentKind ?? 'prescription'}');
+    if ((p.sourceStoragePath ?? '').trim().isNotEmpty) {
+      buffer.writeln('Original file stored: yes');
+      if ((p.sourceOriginalName ?? '').trim().isNotEmpty) {
+        buffer.writeln('Uploaded as: ${p.sourceOriginalName}');
+      }
+    } else {
+      buffer.writeln('Original file stored: no');
+    }
     buffer.writeln(p.patientName != null ? 'Patient: ${p.patientName}' : 'Patient: —');
     buffer.writeln(p.patientFamilyMemberId != null ? 'Linked family member id: ${p.patientFamilyMemberId}' : 'Linked family member id: —');
     buffer.writeln(p.doctorName != null ? 'Doctor: ${p.doctorName}' : 'Doctor: —');
@@ -355,46 +385,6 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     }
   }
 
-  Widget _profilePane(_HomeSnapshot snap) {
-    final plan = snap.me?['plan'];
-    final budget = plan is Map ? plan['ai_budget'] : null;
-
-    final planName = plan is Map ? plan['display_name']?.toString() ?? '' : '';
-
-    final used =
-        budget is Map ?
-            '${budget['used']}'
-        : '—';
-    final lim =
-        budget is Map ?
-            budget['monthly_limit'] == null ?
-                '∞'
-            : '${budget['monthly_limit']}'
-        : '—';
-
-    final famSlots = plan is Map ? plan['family_slots_used']?.toString() ?? '—' : '—';
-    final famCap =
-        plan is Map ?
-          plan['max_family_members'] == null ?
-              '∞'
-          : '${plan['max_family_members']}'
-        : '—';
-
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 32),
-      children: [
-        Text('Plan', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 8),
-        Text(planName.isEmpty ? 'Freemium' : planName),
-        ListTile(contentPadding: EdgeInsets.zero, title: const Text('AI extractions (this period)'), trailing: Text('$used / $lim')),
-        ListTile(contentPadding: EdgeInsets.zero, title: const Text('Family slots'), trailing: Text('$famSlots / $famCap')),
-        const Divider(height: 32),
-        FilledButton.tonal(onPressed: _signOut, child: const Text('Sign out')),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final userEmail = Supabase.instance.client.auth.currentUser?.email;
@@ -436,6 +426,12 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
           final data = snap.data!;
           final latestReport = data.reports.isEmpty ? null : data.reports.first;
           final displayName = data.displayName(userEmail);
+          final mergedDocs = _documentsSorted(data);
+          final planRaw = data.me?['plan'];
+          final planSlug =
+              planRaw is Map && planRaw['slug'] != null ?
+                  planRaw['slug'].toString().trim().toLowerCase()
+              : 'free';
 
           return IndexedStack(
             index: _tabIndex,
@@ -456,42 +452,20 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                 onEditPrescription: _openEditPrescription,
                 onDeletePrescription: _deletePrescriptionAfterConfirm,
               ),
-              Column(
-                children: [
-                  const SafeArea(bottom: false, child: SizedBox(height: 8)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    child: Row(
-                      children: [
-                        IconButton(onPressed: () => setState(() => _tabIndex = 0), icon: const Icon(Icons.arrow_back_ios_new_rounded)),
-                        Text('Upload', style: Theme.of(context).textTheme.titleLarge),
-                      ],
-                    ),
+              Scaffold(
+                appBar: AppBar(
+                  leading: IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                    onPressed: () => setState(() => _tabIndex = 0),
                   ),
-                  Expanded(
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(28),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            FilledButton.icon(
-                              onPressed: _pickAddFlow,
-                              icon: const Icon(Icons.add_photo_alternate_rounded),
-                              label: const Text('Add prescription or report'),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'We distinguish prescriptions vs diagnostics before saving.',
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                  title: const Text('Prescriptions & reports'),
+                ),
+                body: DocumentsLibraryTab(
+                  records: mergedDocs,
+                  onRefresh: _reload,
+                  onOpen: (p) => _showDetail(context, p),
+                  planSlug: planSlug,
+                ),
               ),
               Scaffold(
                 appBar: AppBar(title: const Text('Medicine reminders')),
@@ -504,14 +478,49 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                 ),
               ),
               Scaffold(
-                appBar: AppBar(title: const Text('Profile')),
-                body: RefreshIndicator(onRefresh: _reload, child: _profilePane(data)),
+                appBar: AppBar(
+                  title: const Text('MediSathi'),
+                  centerTitle: false,
+                  actions: [
+                    IconButton(
+                      tooltip: 'Notifications',
+                      icon: const Icon(Icons.notifications_outlined),
+                      onPressed: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Notification center is coming soon.')),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+                body: RefreshIndicator(
+                  onRefresh: _reload,
+                  child: ProfileTab(
+                    displayName: displayName,
+                    userEmail: userEmail,
+                    profile: data.me?['profile'] as Map<String, dynamic>?,
+                    plan: data.me?['plan'] as Map<String, dynamic>?,
+                    onSignOut: _signOut,
+                    onEditAccount: () async {
+                      final ok = await Navigator.of(context).push<bool>(
+                        MaterialPageRoute(
+                          builder: (_) => EditProfileScreen(
+                            api: _api,
+                            initialProfile: data.me?['profile'] as Map<String, dynamic>?,
+                            displayFallback: displayName,
+                          ),
+                        ),
+                      );
+                      if (ok == true && context.mounted) await _reload();
+                    },
+                  ),
+                ),
               ),
             ],
           );
         },
       ),
-      floatingActionButton: _tabIndex == 0 ?
+      floatingActionButton: (_tabIndex == 0 || _tabIndex == 1) ?
           FloatingActionButton.extended(onPressed: _pickAddFlow, icon: const Icon(Icons.add_rounded), label: const Text('Add'))
       : null,
       bottomNavigationBar: NavigationBar(
@@ -519,7 +528,11 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
         onDestinationSelected: (idx) => setState(() => _tabIndex = idx),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'HOME'),
-          NavigationDestination(icon: Icon(Icons.add_circle_outline), label: 'UPLOAD'),
+          NavigationDestination(
+            icon: Icon(Icons.folder_copy_outlined),
+            selectedIcon: Icon(Icons.folder_copy_rounded),
+            label: 'RECORDS',
+          ),
           NavigationDestination(icon: Icon(Icons.schedule_outlined), label: 'REMINDERS'),
           NavigationDestination(icon: Icon(Icons.person_outline), label: 'PROFILE'),
         ],

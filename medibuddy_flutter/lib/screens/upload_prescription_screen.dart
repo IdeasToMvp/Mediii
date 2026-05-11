@@ -1,13 +1,23 @@
 import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../config/document_upload_limits.dart';
 import '../models/prescription.dart';
 import '../services/medibuddy_api.dart';
 
 class UploadPrescriptionScreen extends StatefulWidget {
-  const UploadPrescriptionScreen({super.key});
+  const UploadPrescriptionScreen({
+    super.key,
+    this.planSlug = 'free',
+    this.uploadMaxBytes = DocumentUploadLimits.maxBytes,
+  });
+
+  final String planSlug;
+  final int uploadMaxBytes;
 
   @override
   State<UploadPrescriptionScreen> createState() => _UploadPrescriptionScreenState();
@@ -17,15 +27,12 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
   final _picker = ImagePicker();
   final _api = MediBuddyApi();
 
-  XFile? _file;
+  final List<XFile> _files = [];
+  int _cursor = 0;
+
   bool _analyzing = false;
   bool _saving = false;
-
   Map<String, dynamic>? _analysis;
-
-  bool get _isAnalysisReport =>
-      _analysis != null &&
-      (_analysis!['document_kind'] ?? 'prescription').toString().toLowerCase().trim() == 'report';
 
   final _title = TextEditingController();
   final _patient = TextEditingController();
@@ -35,6 +42,27 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
   final _general = TextEditingController();
   final _notes = TextEditingController();
   final List<_MedRow> _meds = [];
+
+  bool get _paid => DocumentUploadLimits.paidTier(widget.planSlug);
+
+  XFile? get _active => _files.isNotEmpty && _cursor < _files.length ? _files[_cursor] : null;
+
+  bool get _currentIsPdf {
+    final f = _active;
+    if (f == null) return false;
+    final n = f.name.toLowerCase();
+    return n.endsWith('.pdf');
+  }
+
+  bool get _isAnalysisReport =>
+      _analysis != null &&
+      (_analysis!['document_kind'] ?? 'prescription').toString().toLowerCase().trim() == 'report';
+
+  @override
+  void initState() {
+    super.initState();
+    _meds.add(_MedRow());
+  }
 
   @override
   void dispose() {
@@ -51,14 +79,130 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
     super.dispose();
   }
 
-  Future<void> _pick(ImageSource source) async {
-    final img = await _picker.pickImage(source: source, maxWidth: 2000, imageQuality: 88);
-    if (img == null) return;
+  Future<void> _assertFileSize(XFile f) async {
+    final len = await f.length();
+    if (len > widget.uploadMaxBytes) {
+      throw Exception('File is too large (max ${DocumentUploadLimits.humanMaxSize()}).');
+    }
+  }
+
+  /// One batch must be all images or all PDFs (server / AI constraints).
+  bool _homogeneous(List<XFile> xs) {
+    if (xs.isEmpty) return true;
+    final pdfs = xs.where((e) => e.name.toLowerCase().endsWith('.pdf')).length;
+    return pdfs == 0 || pdfs == xs.length;
+  }
+
+  Future<void> _setQueue(List<XFile> next) async {
+    for (final f in next) {
+      await _assertFileSize(f);
+    }
+    if (!_homogeneous(next)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pick either photos only or PDFs only in one batch — not mixed.')),
+      );
+      return;
+    }
+    if (!_paid && next.length > 1) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Free plan: one image at a time.')),
+      );
+      return;
+    }
     setState(() {
-      _file = img;
+      _files
+        ..clear()
+        ..addAll(next);
+      _cursor = 0;
       _analysis = null;
       _clearEditors();
     });
+  }
+
+  Future<void> _pickFreeGallery() async {
+    final img = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 100);
+    if (img == null) return;
+    await _setQueue([img]);
+  }
+
+  Future<void> _pickFreeCamera() async {
+    final img = await _picker.pickImage(source: ImageSource.camera, imageQuality: 100);
+    if (img == null) return;
+    await _setQueue([img]);
+  }
+
+  Future<void> _pickPaidPhotos() async {
+    final list = await _picker.pickMultiImage(imageQuality: 100);
+    if (list.isEmpty) return;
+    await _setQueue(list);
+  }
+
+  Future<void> _pickPaidPdfs() async {
+    final r = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+      withData: kIsWeb,
+    );
+    if (r == null || r.files.isEmpty) return;
+    final out = <XFile>[];
+    for (final pf in r.files) {
+      if (pf.path != null && pf.path!.isNotEmpty) {
+        out.add(XFile(pf.path!));
+      } else if (pf.bytes != null) {
+        out.add(XFile.fromData(pf.bytes!, name: pf.name.isNotEmpty ? pf.name : 'document.pdf'));
+      }
+    }
+    if (out.isEmpty) return;
+    await _setQueue(out);
+  }
+
+  Future<void> _pickPaidCamera() async {
+    final img = await _picker.pickImage(source: ImageSource.camera, imageQuality: 100);
+    if (img == null) return;
+    await _setQueue([img]);
+  }
+
+  void _showPaidPickerSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Photos (multi-select)'),
+              subtitle: const Text('JPEG, PNG, WebP, GIF — processed one after another'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickPaidPhotos();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf_outlined),
+              title: const Text('PDF files'),
+              subtitle: const Text('Stored as-is; add details manually (no AI on PDF yet)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickPaidPdfs();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Camera'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickPaidCamera();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _clearEditors() {
@@ -73,6 +217,7 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
       m.dispose();
     }
     _meds.clear();
+    _meds.add(_MedRow());
   }
 
   void _applyAnalysis(Map<String, dynamic> a) {
@@ -113,9 +258,15 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
   }
 
   Future<void> _analyze() async {
-    final f = _file;
+    final f = _active;
     if (f == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pick an image first.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pick a document first.')));
+      return;
+    }
+    if (_currentIsPdf) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('AI analysis works on photos. PDFs are stored as originals — fill the form and save.')),
+      );
       return;
     }
     setState(() => _analyzing = true);
@@ -139,7 +290,81 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
     }
   }
 
-  Future<void> _save() async {
+  Future<Map<String, dynamic>> _uploadActiveOriginal() async {
+    final f = _active;
+    if (f == null) throw StateError('No file');
+    final meta = await _api.uploadPrescriptionSource(f);
+    return meta;
+  }
+
+  void _advanceOrPopAfterSave() {
+    if (_cursor + 1 < _files.length) {
+      setState(() {
+        _cursor++;
+        _analysis = null;
+        _clearEditors();
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved. Now review document ${_cursor + 1} of ${_files.length}.')),
+        );
+      }
+    } else {
+      Navigator.of(context).pop(true);
+    }
+  }
+
+  Future<void> _savePdfManual() async {
+    final f = _active;
+    if (f == null) return;
+
+    setState(() => _saving = true);
+    try {
+      final up = await _uploadActiveOriginal();
+      final path = up['storage_path']?.toString();
+      final mime = up['mime']?.toString() ?? 'application/pdf';
+      final orig = up['original_name']?.toString() ?? f.name;
+      if (path == null || path.isEmpty) throw const FormatException('Missing storage_path');
+
+      final title = _title.text.trim().isNotEmpty ? _title.text.trim() : orig;
+
+      final res = await _api.createPrescription(
+        source: 'manual',
+        title: title,
+        patientName: _patient.text,
+        doctorName: _doctor.text,
+        prescriptionDate: _date.text,
+        diagnosis: _diagnosis.text,
+        generalInstructions: _general.text,
+        extractionNotes: _notes.text,
+        medications: const [],
+        rawAnalysis: null,
+        documentKind: 'prescription',
+        reportSummary: null,
+        sourceStoragePath: path,
+        sourceMime: mime,
+        sourceOriginalName: orig,
+      );
+
+      if (!mounted) return;
+      final buf = StringBuffer('PDF saved with original file attached.');
+      final pf = res['patient_family_resolution'];
+      if (pf is Map && pf['mode'] != null) {
+        buf.write(' (${pf['mode']})');
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(buf.toString())));
+      _advanceOrPopAfterSave();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save: ${_shortError(e)}')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _saveAnalyzed() async {
     if (_analysis == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Run analysis before saving (AI-filled fields should be reviewed).')),
@@ -186,6 +411,12 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
 
     setState(() => _saving = true);
     try {
+      final up = await _uploadActiveOriginal();
+      final path = up['storage_path']?.toString();
+      final mime = up['mime']?.toString();
+      final orig = up['original_name']?.toString() ?? (_active?.name ?? 'upload');
+      if (path == null || path.isEmpty) throw const FormatException('Missing storage_path');
+
       final res = await _api.createPrescription(
         source: 'analyzed',
         title: _title.text,
@@ -199,11 +430,14 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
         rawAnalysis: _analysis,
         documentKind: isReport ? 'report' : 'prescription',
         reportSummary: reportSummary,
+        sourceStoragePath: path,
+        sourceMime: mime,
+        sourceOriginalName: orig,
       );
 
       if (!mounted) return;
 
-      final buf = StringBuffer('Saved.');
+      final buf = StringBuffer('Saved with original attachment.');
       final pf = res['patient_family_resolution'];
       if (!isReport && pf is Map) {
         final mode = pf['mode']?.toString() ?? '';
@@ -229,7 +463,7 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(buf.toString())));
-      Navigator.of(context).pop(true);
+      _advanceOrPopAfterSave();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -258,53 +492,126 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Upload prescription')),
+      appBar: AppBar(title: const Text('Add prescription or report')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
           Text(
-            'Take a clear photo or choose an image. The AI extraction is best-effort — always verify before saving.',
-            style: Theme.of(context).textTheme.bodyMedium,
+            DocumentUploadLimits.summaryLine(paid: _paid),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.35),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Max ${DocumentUploadLimits.humanMaxSize()} per file — files are stored exactly as uploaded.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
           ),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _pick(ImageSource.camera),
-                  icon: const Icon(Icons.photo_camera_outlined),
-                  label: const Text('Camera'),
-                ),
+          if (_files.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Document ${_files.isEmpty ? 0 : _cursor + 1} of ${_files.length}: ${_active?.name ?? '—'}',
+                style: Theme.of(context).textTheme.labelLarge,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _pick(ImageSource.gallery),
-                  icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('Gallery'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (_file != null)
-            Text(
-              'Selected: ${_file!.name}',
-              style: Theme.of(context).textTheme.labelLarge,
             ),
+          if (_paid) ...[
+            FilledButton.tonalIcon(
+              onPressed: _showPaidPickerSheet,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              label: const Text('Choose files (Plus / Pro)'),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _pickPaidCamera,
+                    icon: const Icon(Icons.photo_camera_outlined),
+                    label: const Text('Camera'),
+                  ),
+                ),
+              ],
+            ),
+          ] else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _pickFreeCamera,
+                    icon: const Icon(Icons.photo_camera_outlined),
+                    label: const Text('Camera'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _pickFreeGallery,
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: const Text('Gallery'),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: (_analyzing || _file == null) ? null : _analyze,
-            icon: _analyzing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.auto_awesome_outlined),
-            label: Text(_analyzing ? 'Analyzing…' : 'Analyze with AI'),
-          ),
-          if (_analysis != null) ...[
+          if (_active != null && !_currentIsPdf) ...[
+            FutureBuilder<Uint8List>(
+              future: _active!.readAsBytes(),
+              builder: (context, snap) {
+                if (!snap.hasData) {
+                  return const SizedBox(height: 160, child: Center(child: CircularProgressIndicator()));
+                }
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.memory(snap.data!, fit: BoxFit.contain, height: 220),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (_currentIsPdf) ...[
+            Card(
+              child: ListTile(
+                leading: Icon(Icons.picture_as_pdf_rounded, color: Colors.red.shade700, size: 36),
+                title: const Text('PDF selected'),
+                subtitle: const Text('Fill optional fields below, then save — the PDF is kept as your original.'),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (_active != null && !_currentIsPdf)
+            FilledButton.icon(
+              onPressed: (_analyzing || _saving) ? null : _analyze,
+              icon: _analyzing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.auto_awesome_outlined),
+              label: Text(_analyzing ? 'Analyzing…' : 'Analyze with AI'),
+            ),
+          if (_currentIsPdf) ...[
+            const SizedBox(height: 8),
+            TextField(controller: _title, decoration: const InputDecoration(labelText: 'Title (defaults to file name)')),
+            const SizedBox(height: 10),
+            TextField(controller: _patient, decoration: const InputDecoration(labelText: 'Patient name (optional)')),
+            const SizedBox(height: 10),
+            TextField(controller: _date, decoration: const InputDecoration(labelText: 'Record date (optional)')),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: _saving ? null : _savePdfManual,
+              icon: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.cloud_upload_outlined),
+              label: Text(_saving ? 'Saving…' : 'Save PDF to library'),
+            ),
+          ],
+          if (_analysis != null && !_currentIsPdf) ...[
             const SizedBox(height: 22),
             Align(
               alignment: Alignment.centerLeft,
@@ -391,7 +698,7 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
               const SizedBox(height: 12),
             ],
             FilledButton.icon(
-              onPressed: _saving ? null : _save,
+              onPressed: (_saving || _analysis == null) ? null : _saveAnalyzed,
               icon: _saving
                   ? const SizedBox(
                       width: 18,

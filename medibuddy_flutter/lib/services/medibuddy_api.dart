@@ -53,6 +53,33 @@ class MediBuddyApi {
     return decoded;
   }
 
+  Future<Map<String, dynamic>> uploadPrescriptionSource(XFile file) async {
+    final uri = Uri.parse('$_base/api/prescriptions/upload-source');
+    final bytes = await file.readAsBytes();
+    final request = http.MultipartRequest('POST', uri);
+    request.headers.addAll(_authHeaders);
+    final name = file.name.isNotEmpty ? file.name : 'document.bin';
+    final mime = _guessUploadMime(name);
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: name,
+        contentType: MediaType.parse(mime),
+      ),
+    );
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      throw MediBuddyApiException(streamed.statusCode, body);
+    }
+    final decoded = jsonDecode(body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected upload-source response');
+    }
+    return decoded;
+  }
+
   Future<Map<String, dynamic>> createPrescription({
     required String source,
     String? title,
@@ -66,6 +93,9 @@ class MediBuddyApi {
     Map<String, dynamic>? rawAnalysis,
     String? documentKind,
     Map<String, dynamic>? reportSummary,
+    String? sourceStoragePath,
+    String? sourceMime,
+    String? sourceOriginalName,
   }) async {
     final uri = Uri.parse('$_base/api/prescriptions');
     final payload = <String, dynamic>{
@@ -86,6 +116,12 @@ class MediBuddyApi {
     }
     if (reportSummary != null) {
       payload['report_summary'] = reportSummary;
+    }
+    final path = _emptyToNull(sourceStoragePath);
+    if (path != null) {
+      payload['source_storage_path'] = path;
+      payload['source_mime'] = _emptyToNull(sourceMime);
+      payload['source_original_name'] = _emptyToNull(sourceOriginalName);
     }
     final res = await http.post(
       uri,
@@ -165,6 +201,24 @@ class MediBuddyApi {
     final decoded = jsonDecode(res.body);
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Unexpected /api/me payload');
+    }
+    return decoded;
+  }
+
+  /// PATCH [display_name], [birth_year], [gender], [timezone]. Omit keys you do not want to change; send null to clear.
+  Future<Map<String, dynamic>> updateProfile(Map<String, dynamic> patch) async {
+    final uri = Uri.parse('$_base/api/me/profile');
+    final res = await http.patch(
+      uri,
+      headers: {..._authHeaders, 'Content-Type': 'application/json'},
+      body: jsonEncode(patch),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected profile patch response');
     }
     return decoded;
   }
@@ -351,6 +405,12 @@ class MediBuddyApi {
     if (lower.endsWith('.webp')) return 'image/webp';
     if (lower.endsWith('.gif')) return 'image/gif';
     return 'image/jpeg';
+  }
+
+  String _guessUploadMime(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    return _guessMime(name);
   }
 }
 

@@ -56,6 +56,9 @@ class Prescription {
     required this.createdAt,
     this.documentKind,
     this.reportSummary,
+    this.sourceStoragePath,
+    this.sourceMime,
+    this.sourceOriginalName,
   });
 
   final String id;
@@ -76,6 +79,11 @@ class Prescription {
   final String? documentKind;
   /// Populated when [documentKind] == `report`.
   final Map<String, dynamic>? reportSummary;
+
+  /// Private storage path in `prescription-sources` bucket (original upload).
+  final String? sourceStoragePath;
+  final String? sourceMime;
+  final String? sourceOriginalName;
 
   factory Prescription.fromJson(Map<String, dynamic> m) {
     final medsDynamic = m['medications'];
@@ -105,6 +113,9 @@ class Prescription {
       createdAt: m['created_at'] != null ? DateTime.tryParse(m['created_at'].toString()) : null,
       documentKind: dk == 'report' ? 'report' : 'prescription',
       reportSummary: reportSummary,
+      sourceStoragePath: _opt(m['source_storage_path']),
+      sourceMime: _opt(m['source_mime']),
+      sourceOriginalName: _opt(m['source_original_name']),
     );
   }
 

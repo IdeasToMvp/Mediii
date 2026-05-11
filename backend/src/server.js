@@ -3,6 +3,8 @@ import cors from "cors";
 import express from "express";
 import multer from "multer";
 import { createClient } from "@supabase/supabase-js";
+import { randomUUID } from "crypto";
+import path from "path";
 import OpenAI from "openai";
 import { analyzeMedicalDocumentImage } from "./openaiMedicalDocument.js";
 import { flattenUpcomingFromRows } from "./medicineExpansion.js";
@@ -23,9 +25,11 @@ if (!OPENAI_API_KEY) {
   process.exit(1);
 }
 
+const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: UPLOAD_MAX_BYTES },
 });
 
 const app = express();
@@ -169,6 +173,25 @@ async function fetchFamilyMembersForUser(supabase, userId) {
   return data || [];
 }
 
+function planSlugFromPeek(peek) {
+  return typeof peek?.plan_slug === "string" && peek.plan_slug.trim() ? peek.plan_slug.trim() : "free";
+}
+
+function mimeAllowedMedicalUpload(planSlug, mimeRaw) {
+  const mime = (mimeRaw || "").toLowerCase();
+  if (/^image\/(jpeg|png|webp|gif)$/.test(mime)) return true;
+  const paid = planSlug === "plus" || planSlug === "pro";
+  return paid && mime === "application/pdf";
+}
+
+function normalizeSourceStoragePath(userId, pathRaw) {
+  const p = typeof pathRaw === "string" ? pathRaw.trim() : "";
+  if (!p) return null;
+  const first = p.split("/")[0];
+  if (first !== userId) return null;
+  return p;
+}
+
 async function insertMedicineSchedulesBulk(supabase, rows) {
   if (!rows?.length) return [];
   const { data, error } = await supabase.from("medicine_schedules").insert(rows).select("*");
@@ -217,6 +240,13 @@ app.get("/api/me", requireUser, async (req, res) => {
               monthly_limit: budget.limit,
             },
             family_slots_used: fmCount ?? 0,
+            upload_caps: {
+              max_bytes: UPLOAD_MAX_BYTES,
+              allows_multi_pick: ue?.plan_slug === "plus" || ue?.plan_slug === "pro",
+              allows_pdf: ue?.plan_slug === "plus" || ue?.plan_slug === "pro",
+              image_types: "JPEG, PNG, WebP, GIF",
+              paid_label: "Plus / Pro",
+            },
           }
         : null,
     });
@@ -226,12 +256,162 @@ app.get("/api/me", requireUser, async (req, res) => {
   }
 });
 
+const ALLOWED_PROFILE_GENDERS = new Set(["female", "male", "non_binary", "prefer_not_say", "other"]);
+
+app.patch("/api/me/profile", requireUser, async (req, res) => {
+  try {
+    await bootstrapUserContext(req.supabase, req.user);
+    const body = req.body || {};
+    const patch = { updated_at: new Date().toISOString() };
+
+    if ("display_name" in body) {
+      if (body.display_name === null || body.display_name === undefined) {
+        patch.display_name = null;
+      } else if (typeof body.display_name === "string") {
+        const t = body.display_name.trim();
+        patch.display_name = t.length ? t.slice(0, 200) : null;
+      }
+    }
+
+    if ("birth_year" in body) {
+      if (body.birth_year === null) {
+        patch.birth_year = null;
+      } else {
+        const y =
+          typeof body.birth_year === "number" ?
+            body.birth_year
+          : typeof body.birth_year === "string" ?
+            Number(body.birth_year)
+          : NaN;
+        const cy = new Date().getUTCFullYear();
+        if (!Number.isFinite(y) || y % 1 !== 0 || y < 1900 || y > cy) {
+          return res.status(400).json({ error: "birth_year must be a whole year between 1900 and the current year." });
+        }
+        patch.birth_year = Math.trunc(y);
+      }
+    }
+
+    if ("gender" in body) {
+      if (body.gender === null || body.gender === undefined || body.gender === "") {
+        patch.gender = null;
+      } else if (typeof body.gender === "string") {
+        const g = body.gender.trim().toLowerCase();
+        if (!ALLOWED_PROFILE_GENDERS.has(g)) {
+          return res.status(400).json({ error: "Invalid gender. Use female, male, non_binary, prefer_not_say, or other." });
+        }
+        patch.gender = g;
+      }
+    }
+
+    if ("timezone" in body && typeof body.timezone === "string") {
+      const tz = body.timezone.trim();
+      if (tz.length) patch.timezone = tz.slice(0, 100);
+    }
+
+    const meaningful = Object.keys(patch).filter((k) => k !== "updated_at");
+    if (meaningful.length === 0) {
+      const { data: p } = await req.supabase.from("user_profiles").select("*").maybeSingle();
+      return res.json({ profile: p });
+    }
+
+    const { error: upErr } = await req.supabase.from("user_profiles").update(patch).eq("user_id", req.user.id);
+    if (upErr) return res.status(400).json({ error: upErr.message });
+
+    const { data: fresh } = await req.supabase.from("user_profiles").select("*").maybeSingle();
+    res.json({ profile: fresh });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "profile_update_failed", detail: String(e.message || e) });
+  }
+});
+
 app.get("/api/subscription/plans", requireUser, async (req, res) => {
   const { data, error } = await req.supabase.from("subscription_plans").select("*").order("max_family_members", {
     ascending: true,
   });
   if (error) return res.status(400).json({ error: error.message });
   res.json({ plans: data || [] });
+});
+
+/**
+ * Persist original bytes to private storage ({user_id}/{uuid}.ext).
+ * Free: images only (jpeg, png, webp, gif). Paid (plus/pro): also application/pdf.
+ */
+app.post("/api/prescriptions/upload-source", requireUser, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: 'multipart field "file" is required' });
+      return;
+    }
+
+    await bootstrapUserContext(req.supabase, req.user);
+    const peek = await peekAiExtractionsBudget(req.supabase);
+    const planSlug = planSlugFromPeek(peek);
+
+    const mime = (req.file.mimetype || "application/octet-stream").trim();
+    if (!mimeAllowedMedicalUpload(planSlug, mime)) {
+      return res.status(400).json({
+        error:
+          planSlug === "free" ?
+            "Free plan accepts JPEG/PNG/WebP/GIF only. Plus or Pro can also upload PDFs."
+          : "Unsupported file type. Allowed: jpeg, png, webp, gif, pdf.",
+        plan_slug: planSlug,
+        max_bytes: UPLOAD_MAX_BYTES,
+      });
+    }
+
+    const extGuess =
+      mime === "application/pdf"
+        ? ".pdf"
+      : mime.includes("webp")
+        ? ".webp"
+      : mime.includes("png")
+        ? ".png"
+      : mime.includes("gif")
+        ? ".gif"
+        : ".jpg";
+
+    let origName =
+      typeof req.file.originalname === "string" && req.file.originalname.trim() ?
+        req.file.originalname.trim().slice(0, 240)
+      : `document${extGuess}`;
+
+    const extFromName = path.extname(origName).toLowerCase();
+    const allowedFromName = /^\.(jpe?g|png|webp|gif|pdf)$/.test(extFromName);
+    const suffix = allowedFromName ? extFromName : extGuess;
+
+    const objectPath = `${req.user.id}/${randomUUID()}${suffix}`;
+
+    const { error: upErr } = await req.supabase.storage.from("prescription-sources").upload(objectPath, req.file.buffer, {
+      contentType: mime,
+      upsert: false,
+    });
+
+    if (upErr) {
+      console.error(upErr);
+      return res.status(500).json({ error: "storage_upload_failed", detail: upErr.message });
+    }
+
+    res.json({
+      storage_path: objectPath,
+      mime,
+      original_name: origName,
+      max_bytes: UPLOAD_MAX_BYTES,
+      plan_slug: planSlug,
+      allowed_notice:
+        planSlug === "free" ?
+          "Free: one image at a time · JPEG/PNG/WebP/GIF · max 10 MB. AI analyzes photos."
+        : "Plus/Pro: multi-select images · PDF uploads · images + PDF · max 10 MB per file. AI analyzes photo images.",
+    });
+  } catch (e) {
+    console.error(e);
+    const msg = String(e.message || "");
+    if (msg === "Multipart: Unexpected field") {
+      res.status(400).json({ error: "Use multipart field name 'file'", max_bytes: UPLOAD_MAX_BYTES });
+      return;
+    }
+    res.status(500).json({ error: "upload_failed", detail: msg });
+  }
 });
 
 /**
@@ -421,6 +601,20 @@ app.post("/api/prescriptions", requireUser, async (req, res) => {
       resolutionSummary = { mode: r.mode, family_member_id: r.family_member_id };
     }
 
+    const rawSourcePath =
+      typeof body.source_storage_path === "string" ? body.source_storage_path.trim() : "";
+    const normalizedSourcePath = rawSourcePath ? normalizeSourceStoragePath(req.user.id, rawSourcePath) : null;
+    if (rawSourcePath && !normalizedSourcePath) {
+      return res.status(400).json({ error: "source_storage_path invalid or must match your account prefix." });
+    }
+    const storedPath = normalizedSourcePath;
+    const sourceMime =
+      typeof body.source_mime === "string" && body.source_mime.trim().length ? body.source_mime.trim().slice(0, 200) : null;
+    const sourceOriginalName =
+      typeof body.source_original_name === "string" && body.source_original_name.trim().length ?
+        body.source_original_name.trim().slice(0, 500)
+      : null;
+
     const payload = {
       user_id: req.user.id,
       title: typeof body.title === "string" ? body.title : null,
@@ -439,6 +633,9 @@ app.post("/api/prescriptions", requireUser, async (req, res) => {
       document_kind: documentKind,
       report_summary: documentKind === "report" ? reportSummary : null,
       patient_family_member_id: linkedFm,
+      source_storage_path: storedPath,
+      source_mime: storedPath ? sourceMime || null : null,
+      source_original_name: storedPath ? sourceOriginalName || null : null,
     };
 
     const { data, error } = await req.supabase.from("prescriptions").insert(payload).select("*").single();
@@ -579,6 +776,23 @@ app.patch("/api/prescriptions/:id", requireUser, async (req, res) => {
         return res.status(400).json({ error: "patient_family_member_id invalid." });
       }
       patch.patient_family_member_id = fid;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "source_storage_path")) {
+    const raw = typeof body.source_storage_path === "string" ? body.source_storage_path.trim() : "";
+    if (!raw) {
+      patch.source_storage_path = null;
+      patch.source_mime = null;
+      patch.source_original_name = null;
+    } else {
+      const nPath = normalizeSourceStoragePath(req.user.id, raw);
+      if (!nPath) return res.status(400).json({ error: "source_storage_path invalid." });
+      patch.source_storage_path = nPath;
+      if (typeof body.source_mime === "string") patch.source_mime = body.source_mime.trim().slice(0, 200) || null;
+      if (typeof body.source_original_name === "string") {
+        patch.source_original_name = body.source_original_name.trim().slice(0, 500) || null;
+      }
     }
   }
 
