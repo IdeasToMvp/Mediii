@@ -24,6 +24,26 @@ String? _familySubtitle(Map<String, dynamic> fm) {
   return parts.join(' · ');
 }
 
+bool _dueLocalIsToday(DateTime d) {
+  final l = d.toLocal();
+  final n = DateTime.now();
+  return l.year == n.year && l.month == n.month && l.day == n.day;
+}
+
+List<Map<String, dynamic>> _occurrencesDueToday(List<Map<String, dynamic>> occurrences) {
+  final list = occurrences.where((e) {
+    final d = DateTime.tryParse(e['due_at_iso']?.toString() ?? '');
+    return d != null && _dueLocalIsToday(d);
+  }).toList();
+  list.sort((a, b) {
+    final da = DateTime.tryParse(a['due_at_iso']?.toString() ?? '');
+    final db = DateTime.tryParse(b['due_at_iso']?.toString() ?? '');
+    if (da == null || db == null) return 0;
+    return da.compareTo(db);
+  });
+  return list;
+}
+
 Widget _glowBrandTitle(TextTheme textTheme) {
   return ShaderMask(
     blendMode: BlendMode.srcIn,
@@ -60,7 +80,6 @@ class DashboardHomeScreen extends StatelessWidget {
     required this.onAddFamilyTap,
     required this.onEditFamilyMember,
     required this.onDeleteFamilyMember,
-    required this.onSearchFocusTap,
     required this.onRecentPrescriptionTap,
     required this.onEditPrescription,
     required this.onDeletePrescription,
@@ -78,7 +97,6 @@ class DashboardHomeScreen extends StatelessWidget {
   final VoidCallback onAddFamilyTap;
   final Future<void> Function(Map<String, dynamic> member) onEditFamilyMember;
   final Future<void> Function(Map<String, dynamic> member) onDeleteFamilyMember;
-  final VoidCallback onSearchFocusTap;
   final void Function(Prescription p) onRecentPrescriptionTap;
   final Future<void> Function(Prescription p) onEditPrescription;
   final Future<void> Function(Prescription p) onDeletePrescription;
@@ -90,20 +108,10 @@ class DashboardHomeScreen extends StatelessWidget {
     return 'Good evening';
   }
 
-  int _medicinesScheduledToday() {
-    final now = DateTime.now();
-    return upcomingMedicines.where((e) {
-      final iso = e['due_at_iso']?.toString();
-      final d = DateTime.tryParse(iso ?? '');
-      if (d == null) return false;
-      final l = d.toLocal();
-      return l.year == now.year && l.month == now.month && l.day == now.day;
-    }).length;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final medCount = upcomingMedicines.isEmpty ? 0 : _medicinesScheduledToday();
+    final dosesToday = _occurrencesDueToday(upcomingMedicines);
+    final medCount = dosesToday.length;
     final timeFmt = DateFormat.jm();
 
     return RefreshIndicator(
@@ -201,42 +209,15 @@ class DashboardHomeScreen extends StatelessWidget {
                       Text(
                         upcomingMedicines.isEmpty
                             ? 'No reminders yet — capture a prescription to get gentle nudges.'
-                            : 'You have $medCount medication${medCount == 1 ? '' : 's'} on the clock today.',
+                            : medCount == 0
+                                ? 'Nothing scheduled for today — open Reminders to see upcoming days.'
+                                : 'You have $medCount dose${medCount == 1 ? '' : 's'} on the clock today.',
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                               color: Colors.white.withValues(alpha: 0.78),
                               height: 1.35,
                             ),
                       ),
-                      const SizedBox(height: 20),
-                      Material(
-                        color: Colors.white.withValues(alpha: 0.13),
-                        borderRadius: BorderRadius.circular(22),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(22),
-                          onTap: onSearchFocusTap,
-                          splashColor: MediSathiColors.neonAccent.withValues(alpha: 0.22),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                            child: Row(
-                              children: [
-                                Icon(Icons.search_rounded, color: Colors.white.withValues(alpha: 0.88)),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Text(
-                                    'Ask MediSathi… records, meds, doctors',
-                                    style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.78),
-                                      fontSize: 15,
-                                      letterSpacing: 0.05,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 30),
+                      const SizedBox(height: 28),
                       Row(
                         children: [
                           Container(
@@ -253,7 +234,7 @@ class DashboardHomeScreen extends StatelessWidget {
                           ),
                           const SizedBox(width: 10),
                           Text(
-                            'Upcoming medicines',
+                            "Today's medicines",
                             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.w800,
                                   color: const Color(0xFF0F172A),
@@ -291,14 +272,25 @@ class DashboardHomeScreen extends StatelessWidget {
                 ),
               ),
             )
+          else if (dosesToday.isEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(32, 8, 32, 24),
+              sliver: SliverToBoxAdapter(
+                child: Text(
+                  'No doses scheduled for today. Tap View schedule to see reminders for other days.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.black45, height: 1.35),
+                ),
+              ),
+            )
           else
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               sliver: SliverList.separated(
-                itemCount: upcomingMedicines.length.clamp(0, 4),
+                itemCount: dosesToday.length.clamp(0, 4),
                 separatorBuilder: (context, index) => const SizedBox(height: 10),
                 itemBuilder: (context, idx) {
-                  final m = upcomingMedicines[idx];
+                  final m = dosesToday[idx];
                   final name = m['medication_name']?.toString() ?? 'Medicine';
                   final dosage = m['dosage_text']?.toString() ?? '';
                   final instruct = m['meal_instruction']?.toString().trim();

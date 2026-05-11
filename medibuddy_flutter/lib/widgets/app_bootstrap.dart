@@ -5,6 +5,7 @@ import '../screens/home_shell.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/splash_screen.dart';
 import '../services/onboarding_prefs.dart';
+import 'medisathi_loader.dart';
 
 /// Cold start (signed out): splash → onboarding (first launch) → [HomeShell].
 /// Signed in: [HomeShell] directly.
@@ -56,7 +57,11 @@ class _AppBootstrapState extends State<AppBootstrap> {
     }
     if (_onboardingComplete == null) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        body: Center(
+          child: MediSathiLoader(
+            secondaryMessage: 'Checking your MediSathi setup…',
+          ),
+        ),
       );
     }
     if (!_onboardingComplete!) {

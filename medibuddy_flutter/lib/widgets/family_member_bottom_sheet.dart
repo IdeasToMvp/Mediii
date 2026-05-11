@@ -175,6 +175,7 @@ class _FamilyMemberSheetState extends State<_FamilyMemberSheet> {
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom.clamp(0.0, double.infinity);
     final theme = Theme.of(context);
+    const heroTitle = Color(0xFFF8FAFC);
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
@@ -222,6 +223,7 @@ class _FamilyMemberSheetState extends State<_FamilyMemberSheet> {
                   style: theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.5,
+                        color: heroTitle,
                       ),
                 ),
                 const SizedBox(height: 6),
@@ -230,7 +232,7 @@ class _FamilyMemberSheetState extends State<_FamilyMemberSheet> {
                       ? 'Keep details current for smarter prescription matching and reminders.'
                       : 'Age helps us personalize care context. Relation makes records easier to read.',
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.65),
+                    color: Colors.white.withValues(alpha: 0.78),
                     height: 1.35,
                   ),
                 ),
@@ -320,7 +322,7 @@ class _FamilyMemberSheetState extends State<_FamilyMemberSheet> {
                   'Quick relation',
                   style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.72),
+                    color: Colors.white.withValues(alpha: 0.85),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -330,11 +332,21 @@ class _FamilyMemberSheetState extends State<_FamilyMemberSheet> {
                   children: [
                     for (final label in _relationPresets)
                       ChoiceChip(
-                        label: Text(label),
+                        label: Text(
+                          label,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color:
+                                _selectedPreset == label ? const Color(0xFF0F172A) : Colors.white.withValues(alpha: 0.92),
+                          ),
+                        ),
                         selected: _selectedPreset == label,
                         showCheckmark: false,
                         visualDensity: VisualDensity.compact,
-                        selectedColor: MediSathiColors.neonAccent.withValues(alpha: 0.28),
+                        backgroundColor: Colors.white.withValues(alpha: 0.12),
+                        selectedColor: MediSathiColors.neonAccent.withValues(alpha: 0.38),
+                        side: BorderSide(color: Colors.white.withValues(alpha: 0.22)),
                         onSelected: (_) => _applyPreset(label),
                       ),
                   ],

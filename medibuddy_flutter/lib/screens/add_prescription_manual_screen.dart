@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/prescription.dart';
 import '../services/medibuddy_api.dart';
+import '../widgets/medisathi_loader.dart';
 
 class AddPrescriptionManualScreen extends StatefulWidget {
   const AddPrescriptionManualScreen({super.key, this.prescriptionId});
@@ -195,7 +196,12 @@ class _AddPrescriptionManualScreenState extends State<AddPrescriptionManualScree
     if (_hydrating) {
       return Scaffold(
         appBar: AppBar(title: Text(isEdit ? 'Edit prescription' : 'Add prescription')),
-        body: const Center(child: CircularProgressIndicator()),
+        body: Center(
+          child: MediSathiLoader(
+            message: isEdit ? 'Loading prescription' : null,
+            secondaryMessage: isEdit ? 'Fetching details…' : null,
+          ),
+        ),
       );
     }
 

@@ -1,13 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/prescription.dart';
 import '../services/medibuddy_api.dart';
-import '../theme/medisathi_colors.dart';
 import '../widgets/family_member_bottom_sheet.dart';
+import '../widgets/medisathi_loader.dart';
+import 'medicine_reminders_tab.dart';
 import 'add_prescription_manual_screen.dart';
 import 'dashboard_home_screen.dart';
 import 'login_screen.dart';
@@ -36,6 +36,7 @@ class _HomeSnapshot {
     required this.familyMembers,
     required this.prescriptions,
     required this.reports,
+    required this.medicineSchedules,
   });
 
   final Map<String, dynamic>? me;
@@ -43,6 +44,7 @@ class _HomeSnapshot {
   final List<Map<String, dynamic>> familyMembers;
   final List<Prescription> prescriptions;
   final List<Prescription> reports;
+  final List<Map<String, dynamic>> medicineSchedules;
 
   String displayName([String? emailFallback]) {
     final p = me?['profile'];
@@ -80,6 +82,7 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
         : <Map<String, dynamic>>[];
     final rxMaps = await _api.listPrescriptions(kind: 'prescription');
     final repMaps = await _api.listPrescriptions(kind: 'report');
+    final schedMaps = await _api.listMedicineSchedules();
 
     return _HomeSnapshot(
       me: meRaw,
@@ -87,6 +90,7 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
       familyMembers: famList,
       prescriptions: rxMaps.map(Prescription.fromJson).toList(),
       reports: repMaps.map(Prescription.fromJson).toList(),
+      medicineSchedules: schedMaps,
     );
   }
 
@@ -351,45 +355,6 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     }
   }
 
-  Widget _occurrencesPane(_HomeSnapshot snap) {
-    final fmt = DateFormat.yMMMd().add_jm();
-    final occ = snap.occurrences;
-    if (occ.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            'No upcoming doses.\nGenerate schedules from a prescription (`POST /api/medicine-schedules/from-prescription`) or create them manually.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.black54),
-          ),
-        ),
-      );
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-      itemCount: occ.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 10),
-      itemBuilder: (context, idx) {
-        final m = occ[idx];
-        final when = DateTime.tryParse((m['due_at_iso'] ?? '').toString());
-        final s = when == null ? '—' : fmt.format(when.toLocal());
-
-        return Card(
-          child: ListTile(
-            leading: CircleAvatar(backgroundColor: MediSathiColors.brandBlue.withValues(alpha: 0.12), child: const Icon(Icons.alarm_rounded)),
-            title: Text(m['medication_name']?.toString() ?? 'Medicine', style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text([
-              if ((m['dosage_text'] ?? '').toString().trim().isNotEmpty) m['dosage_text'].toString(),
-              if ((m['meal_instruction'] ?? '').toString().trim().isNotEmpty) m['meal_instruction'].toString(),
-            ].join(' · ')),
-            trailing: Text(s, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-          ),
-        );
-      },
-    );
-  }
-
   Widget _profilePane(_HomeSnapshot snap) {
     final plan = snap.me?['plan'];
     final budget = plan is Map ? plan['ai_budget'] : null;
@@ -430,22 +395,6 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     );
   }
 
-  Widget _placeholder(String title, String body, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.all(28),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 48, color: Colors.black26),
-          const SizedBox(height: 16),
-          Text(title, textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          Text(body, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.black54)),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final userEmail = Supabase.instance.client.auth.currentUser?.email;
@@ -455,7 +404,12 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(
+              child: MediSathiLoader(
+                message: 'Getting things ready',
+                secondaryMessage: 'Syncing prescriptions and reminders...',
+              ),
+            );
           }
 
           if (snap.hasError) {
@@ -494,35 +448,13 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                 recentPrescriptions: data.prescriptions,
                 latestReport: latestReport,
                 onRefresh: _reload,
-                onViewScheduleTap: () => setState(() => _tabIndex = 3),
+                onViewScheduleTap: () => setState(() => _tabIndex = 2),
                 onAddFamilyTap: _promptAddFamily,
                 onEditFamilyMember: _promptEditFamily,
                 onDeleteFamilyMember: _deleteFamilyMemberAfterConfirm,
-                onSearchFocusTap: () => setState(() => _tabIndex = 1),
                 onRecentPrescriptionTap: (p) => _showDetail(context, p),
                 onEditPrescription: _openEditPrescription,
                 onDeletePrescription: _deletePrescriptionAfterConfirm,
-              ),
-              Column(
-                children: [
-                  const SafeArea(bottom: false, child: SizedBox(height: 8)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    child: Row(
-                      children: [
-                        IconButton(onPressed: () => setState(() => _tabIndex = 0), icon: const Icon(Icons.arrow_back_ios_new_rounded)),
-                        Text('Search', style: Theme.of(context).textTheme.titleLarge),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: _placeholder(
-                      'Search is coming soon',
-                      'Behind the scenes, records are searchable via prescriptions + document_kind segregation.',
-                      Icons.search_rounded,
-                    ),
-                  ),
-                ],
               ),
               Column(
                 children: [
@@ -563,7 +495,13 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
               ),
               Scaffold(
                 appBar: AppBar(title: const Text('Medicine reminders')),
-                body: _occurrencesPane(data),
+                body: MedicineRemindersTab(
+                  occurrences: data.occurrences,
+                  schedules: data.medicineSchedules,
+                  familyMembers: data.familyMembers,
+                  api: _api,
+                  onRefresh: _reload,
+                ),
               ),
               Scaffold(
                 appBar: AppBar(title: const Text('Profile')),
@@ -577,11 +515,10 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
           FloatingActionButton.extended(onPressed: _pickAddFlow, icon: const Icon(Icons.add_rounded), label: const Text('Add'))
       : null,
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _tabIndex.clamp(0, 4),
+        selectedIndex: _tabIndex.clamp(0, 3),
         onDestinationSelected: (idx) => setState(() => _tabIndex = idx),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'HOME'),
-          NavigationDestination(icon: Icon(Icons.search_outlined), label: 'SEARCH'),
           NavigationDestination(icon: Icon(Icons.add_circle_outline), label: 'UPLOAD'),
           NavigationDestination(icon: Icon(Icons.schedule_outlined), label: 'REMINDERS'),
           NavigationDestination(icon: Icon(Icons.person_outline), label: 'PROFILE'),

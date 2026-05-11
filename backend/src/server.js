@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import { analyzeMedicalDocumentImage } from "./openaiMedicalDocument.js";
 import { flattenUpcomingFromRows } from "./medicineExpansion.js";
-import { buildMedicineScheduleInserts } from "./medicineSynth.js";
+import { buildMedicineScheduleInserts, addDaysToIso } from "./medicineSynth.js";
 import { resolvePatientFamilyMember } from "./patientFamilyResolve.js";
 
 const PORT = Number(process.env.PORT) || 3200;
@@ -764,6 +764,26 @@ app.post("/api/medicine-schedules", requireUser, async (req, res) => {
       timePoints = ["09:00"];
     }
 
+    const start_date =
+      typeof body.start_date === "string" && body.start_date.trim().length ?
+        body.start_date.trim()
+      : new Date().toISOString().slice(0, 10);
+
+    let end_date =
+      typeof body.end_date === "string" && body.end_date.trim().length ? body.end_date.trim() : null;
+
+    if (
+      end_date === null &&
+      typeof body.course_days === "number" &&
+      Number.isFinite(body.course_days)
+    ) {
+      const n = Math.trunc(body.course_days);
+      if (n > 0) {
+        const computed = addDaysToIso(start_date, n - 1);
+        if (computed) end_date = computed;
+      }
+    }
+
     const row = {
       user_id: req.user.id,
       family_member_id: fmId,
@@ -786,8 +806,8 @@ app.post("/api/medicine-schedules", requireUser, async (req, res) => {
         typeof body.weekdays === "undefined" || body.weekdays === null ?
           null
         : body.weekdays,
-      start_date: typeof body.start_date === "string" ? body.start_date : new Date().toISOString().slice(0, 10),
-      end_date: typeof body.end_date === "string" ? body.end_date : null,
+      start_date,
+      end_date,
       timezone: typeof body.timezone === "string" ? body.timezone : "UTC",
       updated_at: new Date().toISOString(),
     };
@@ -811,11 +831,32 @@ app.patch("/api/medicine-schedules/:id", requireUser, async (req, res) => {
   /** @type {Record<string, any>} */
   const patch = {};
 
-  ["medication_name", "dosage_text", "meal_instruction", "timezone", "start_date", "end_date", "prescription_id"].forEach(
-    (k) => {
-      if (typeof body[k] === "string") patch[k] = body[k];
-    },
-  );
+  ["medication_name", "timezone", "start_date", "prescription_id"].forEach((k) => {
+    if (typeof body[k] === "string") patch[k] = body[k];
+  });
+
+  if ("dosage_text" in body) {
+    if (typeof body.dosage_text === "string") {
+      patch.dosage_text = body.dosage_text.trim().length ? body.dosage_text.trim() : null;
+    } else {
+      patch.dosage_text = null;
+    }
+  }
+  if ("meal_instruction" in body) {
+    if (typeof body.meal_instruction === "string") {
+      patch.meal_instruction = body.meal_instruction.trim().length ? body.meal_instruction.trim() : null;
+    } else {
+      patch.meal_instruction = null;
+    }
+  }
+
+  if ("end_date" in body) {
+    if (typeof body.end_date === "string" && body.end_date.trim().length > 0) {
+      patch.end_date = body.end_date.trim();
+    } else {
+      patch.end_date = null;
+    }
+  }
   if (typeof body.medication_line_index === "number") patch.medication_line_index = body.medication_line_index;
   if (typeof body.family_member_id === "string" || body.family_member_id === null) {
     if (typeof body.family_member_id === "string") {

@@ -184,6 +184,61 @@ class MediBuddyApi {
     return (decoded['occurrences'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
+  Future<List<Map<String, dynamic>>> listMedicineSchedules() async {
+    final uri = Uri.parse('$_base/api/medicine-schedules');
+    final res = await http.get(uri, headers: _authHeaders);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map || decoded['schedules'] is! List) {
+      throw const FormatException('Unexpected medicine-schedules list');
+    }
+    return (decoded['schedules'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<Map<String, dynamic>> createMedicineSchedule(Map<String, dynamic> body) async {
+    final uri = Uri.parse('$_base/api/medicine-schedules');
+    final res = await http.post(
+      uri,
+      headers: {..._authHeaders, 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected create schedule response');
+    }
+    return decoded;
+  }
+
+  Future<Map<String, dynamic>> updateMedicineSchedule(String id, Map<String, dynamic> patch) async {
+    final uri = Uri.parse('$_base/api/medicine-schedules/$id');
+    final res = await http.patch(
+      uri,
+      headers: {..._authHeaders, 'Content-Type': 'application/json'},
+      body: jsonEncode(patch),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected update schedule response');
+    }
+    return decoded;
+  }
+
+  Future<void> deleteMedicineSchedule(String id) async {
+    final uri = Uri.parse('$_base/api/medicine-schedules/$id');
+    final res = await http.delete(uri, headers: _authHeaders);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+  }
+
   Future<Map<String, dynamic>> listFamilyPayload() async {
     final uri = Uri.parse('$_base/api/family-members');
     final res = await http.get(uri, headers: _authHeaders);

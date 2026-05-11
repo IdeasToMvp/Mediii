@@ -361,6 +361,13 @@ class _UploadPrescriptionScreenState extends State<UploadPrescriptionScreen> {
                   ),
                 ],
               ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'Duration (e.g. "7 days" or "2 weeks") is optional — when present we set an end date for reminders automatically. Leave duration blank or "as needed" for open-ended reminders.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54, height: 1.35),
+                ),
+              ),
               for (var i = 0; i < _meds.length; i++) ...[
                 _MedicationEditor(
                   index: i,

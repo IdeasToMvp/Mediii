@@ -1,6 +1,6 @@
 import { parseDurationDays } from "./durationParse.js";
 
-function addDaysToIso(isoDate, deltaDays) {
+export function addDaysToIso(isoDate, deltaDays) {
   const [y, mo, d] = isoDate.split("-").map((x) => Number(x));
   if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
   const dt = new Date(Date.UTC(y, mo - 1, d));
@@ -82,7 +82,10 @@ export function buildMedicineScheduleInserts(rx, userId, options = {}) {
     if (!nameRaw) continue;
 
     const times = deriveTimePoints(m, defaultTimes);
-    const durDays = parseDurationDays(m.duration);
+    const durDays =
+      parseDurationDays(m.duration) ??
+      parseDurationDays(m.frequency) ??
+      parseDurationDays(m.instructions);
     /** @type {string | null} */
     let endDate = null;
     if (durDays != null && durDays > 0 && startDate) {
@@ -107,7 +110,7 @@ export function buildMedicineScheduleInserts(rx, userId, options = {}) {
       schedule_kind: "daily",
       time_points: times,
       start_date: startDate,
-      end_date,
+      end_date: endDate,
       timezone: typeof options.timezone === "string" ? options.timezone : "UTC",
       updated_at: new Date().toISOString(),
     });
