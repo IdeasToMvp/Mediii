@@ -4,7 +4,10 @@
 # Set in Vercel → Settings → Environment Variables (Production / Preview as needed):
 #   SUPABASE_URL
 #   SUPABASE_ANON_KEY
-#   API_BASE_URL   (e.g. https://mediii-production.up.railway.app — no trailing slash)
+# Optional:
+#   API_BASE_URL — only if you must override the API host. Leave UNSET so the web app calls
+#   the same origin (e.g. https://your-app.vercel.app) and `vercel.json` rewrites `/api/*`
+#   to Railway; this fixes mobile in-app browsers (WhatsApp, etc.) blocking cross-origin API calls.
 
 set -euo pipefail
 export GIT_TERMINAL_PROMPT=0
@@ -14,7 +17,6 @@ echo "Vercel env: VERCEL_ENV=${VERCEL_ENV:-<unset>}"
 missing=()
 [[ -z "${SUPABASE_URL:-}" ]] && missing+=("SUPABASE_URL")
 [[ -z "${SUPABASE_ANON_KEY:-}" ]] && missing+=("SUPABASE_ANON_KEY")
-[[ -z "${API_BASE_URL:-}" ]] && missing+=("API_BASE_URL")
 
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "Missing required environment variables: ${missing[*]}"
@@ -35,7 +37,12 @@ export PATH="${FLUTTER_DIR}/bin:${PATH}"
 flutter config --enable-web --no-analytics >/dev/null
 flutter precache --web
 flutter pub get
-flutter build web --release \
-  --dart-define=SUPABASE_URL="${SUPABASE_URL}" \
-  --dart-define=SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}" \
-  --dart-define=API_BASE_URL="${API_BASE_URL}"
+defs=(
+  "--dart-define=SUPABASE_URL=${SUPABASE_URL}"
+  "--dart-define=SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}"
+)
+if [[ -n "${API_BASE_URL:-}" ]]; then
+  defs+=("--dart-define=API_BASE_URL=${API_BASE_URL}")
+fi
+
+flutter build web --release "${defs[@]}"

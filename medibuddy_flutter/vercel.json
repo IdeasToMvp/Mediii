@@ -3,5 +3,11 @@
   "buildCommand": "bash scripts/vercel-build.sh",
   "installCommand": "echo skip",
   "outputDirectory": "build/web",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://mediii-production.up.railway.app/api/:path*"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }

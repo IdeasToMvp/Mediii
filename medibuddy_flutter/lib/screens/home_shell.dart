@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -404,6 +405,8 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
 
           if (snap.hasError) {
             final err = snap.error!;
+            final errText = _shortNetworkError(err);
+            final suggestInAppBrowser = kIsWeb && errText.contains('Load failed');
             return Padding(
               padding: const EdgeInsets.all(22),
               child: Column(
@@ -411,7 +414,15 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                 children: [
                   Text('Could not load dashboard data.', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  Text(_shortNetworkError(err), style: Theme.of(context).textTheme.bodySmall),
+                  Text(errText, style: Theme.of(context).textTheme.bodySmall),
+                  if (suggestInAppBrowser) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      'Links opened inside chat apps sometimes block loading the API. Open this site in Safari or Chrome instead, then tap Retry.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.35),
+                    ),
+                  ],
                   const SizedBox(height: 14),
                   FilledButton(onPressed: _reload, child: const Text('Retry')),
                   if (userEmail != null) ...[

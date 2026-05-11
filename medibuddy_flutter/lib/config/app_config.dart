@@ -16,9 +16,21 @@ class AppConfig {
   static const String _apiDefault = String.fromEnvironment('API_BASE_URL', defaultValue: '');
 
   /// Android emulator: use `--dart-define=API_BASE_URL=http://10.0.2.2:3200`
+  ///
+  /// **Web (hosted):** when `API_BASE_URL` is not set at build time, the app uses [Uri.base.origin]
+  /// so all `/api/*` calls hit the **same host** as the Flutter web bundle (e.g. Vercel). Route
+  /// `/api/*` there to your Node API (see `vercel.json` rewrites). This avoids failures in embedded
+  /// browsers (WhatsApp, Instagram, etc.) that often block cross-origin fetch to another domain.
   static String get apiBaseUrl {
-    if (_apiDefault.isNotEmpty) return _apiDefault.trim();
-    if (kIsWeb) return 'http://localhost:3200';
+    final trimmed = _apiDefault.trim();
+    if (trimmed.isNotEmpty) return trimmed;
+    if (kIsWeb) {
+      final host = Uri.base.host.toLowerCase();
+      final local =
+          host == 'localhost' || host == '127.0.0.1' || host == '[::1]' || host.endsWith('.local');
+      if (local) return 'http://localhost:3200';
+      return Uri.base.origin;
+    }
     try {
       if (Platform.isAndroid) return 'http://10.0.2.2:3200';
     } catch (_) {
