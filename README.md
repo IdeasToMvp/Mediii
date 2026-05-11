@@ -45,20 +45,24 @@ The API verifies the caller by treating the `Authorization: Bearer` value as a S
 
 ### Android / iOS artifacts (Postman)
 
-1. Apply migrations **`011_app_releases`** (table + bucket), **`012`** (bucket limit), **`013`** (`apk_download_url`), **`014`** (`platform` column — `android` \| `ios`).
-2. Set **`SUPABASE_SERVICE_ROLE_KEY`** and **`APK_ADMIN_UPLOAD_TOKEN`** on the server (`backend/.env.example`).
+1. Apply migrations **`011_app_releases`** through **`015_app_releases_update_mandatory`** (table includes `created_at` = publish/upload time on the server, and **`update_mandatory`** = force blocking update on clients).
+2. Set **`SUPABASE_SERVICE_ROLE_KEY`** and a release upload secret on the server: **`APK_ADMIN_UPLOAD_TOKEN`** or **`UPLOAD_RELEASE_API_KEY`** (either env var supplies the expected value).
 
-**Option A — multipart upload to Storage:** `POST /api/admin/app-releases` (`multipart/form-data`), header **`X-Admin-Upload-Token`**. Fields: **`apk`** (file — `.apk` when `platform` is `android`, `.ipa` when `ios`), **`version`**, **`version_code`**, optional **`release_notes`**, **`channel`**, **`platform`** or **`build_type`** (`android` \| `ios`, default `android`).
+**Mandatory credential on every upload request:** **`X-Upload-Api-Key`** (recommended), **`Authorization: Bearer <token>`**, or legacy **`X-Admin-Upload-Token`** / **`X-Apk-Admin-Token`**. Omitting a key or mismatch returns **401**; if neither env secret is set, **503**.
 
-**Option B — hosted HTTPS link (JSON):** `POST /api/admin/app-releases/link` with `Content-Type: application/json`, same header. Body includes **`download_url`**, **`version`**, **`version_code`**, optional **`platform`** / **`build_type`**, **`release_notes`**, **`channel`**, **`apk_filename`**, **`apk_byte_size`**.
+**Option A — multipart upload to Storage:** `POST /api/admin/app-releases` (`multipart/form-data`). Fields: **`apk`** (file — `.apk` when `platform` is `android`, `.ipa` when `ios`), **`version`**, **`version_code`**, optional **`release_notes`**, **`channel`**, **`update_mandatory`** (`true` \| `false` \| `1` \| `0` — blocking client prompt when true), **`platform`** or **`build_type`** (`android` \| `ios`, default `android`).
+
+**Option B — hosted HTTPS link (JSON):** `POST /api/admin/app-releases/link` with `Content-Type: application/json`, same credential headers. Body includes **`download_url`**, **`version`**, **`version_code`**, optional **`platform`** / **`build_type`**, **`release_notes`**, **`channel`**, **`update_mandatory`**, **`apk_filename`**, **`apk_byte_size`**.
+
+Responses include **`created_at`** (server publish timestamp) for each stored release row. Clients primarily compare **`version_code`** to decide “there is a newer build”; **`update_mandatory`** forces a blocking update UX.
 
 Example (Android + Drive link):
 
 ```bash
 curl -X POST "$API/api/admin/app-releases/link" \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Upload-Token: $TOKEN" \
-  -d '{"download_url":"https://drive.google.com/file/d/FILE_ID/view","version":"1.2.0","version_code":20,"platform":"android","release_notes":"Bug fixes"}'
+  -H "X-Upload-Api-Key: $UPLOAD_RELEASE_API_KEY" \
+  -d '{"download_url":"https://drive.google.com/file/d/FILE_ID/view","version":"1.2.0","version_code":20,"platform":"android","release_notes":"Bug fixes","update_mandatory":false}'
 ```
 
 iOS link (structure ready for TestFlight / hosted IPA):
@@ -66,7 +70,7 @@ iOS link (structure ready for TestFlight / hosted IPA):
 ```bash
 curl -X POST "$API/api/admin/app-releases/link" \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Upload-Token: $TOKEN" \
+  -H "X-Upload-Api-Key: $UPLOAD_RELEASE_API_KEY" \
   -d '{"download_url":"https://…","version":"1.2.0","version_code":20,"build_type":"ios","apk_filename":"MediSathi.ipa"}'
 ```
 

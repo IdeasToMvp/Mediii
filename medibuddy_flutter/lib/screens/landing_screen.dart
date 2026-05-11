@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../theme/medisathi_colors.dart';
@@ -32,6 +33,9 @@ class _WelcomeWebFlowState extends State<WelcomeWebFlow> {
 
   @override
   Widget build(BuildContext context) {
+    // Belt-and-suspenders: native Android / iOS should never ship this funnel (see HomeShell routing).
+    if (!kIsWeb) return const LoginScreen();
+
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 520),
       switchInCurve: Curves.easeOutCubic,
@@ -54,7 +58,7 @@ class _WelcomeWebFlowState extends State<WelcomeWebFlow> {
   }
 }
 
-/// MediSathi public marketing page (trust-forward, calm clinical aesthetic).
+/// MediSathi public marketing page (web only). On native platforms the app uses [LoginScreen] instead.
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key, required this.onRequestSignIn});
 
@@ -132,6 +136,8 @@ class _LandingScreenState extends State<LandingScreen> with TickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
+    if (!kIsWeb) return const LoginScreen();
+
     final w = MediaQuery.sizeOf(context).width;
     // Reads like a marketing site on large desktops; still comfortable on tablets/phones.
     final maxContent = (w * 0.94).clamp(320.0, 1320.0);

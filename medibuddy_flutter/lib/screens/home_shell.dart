@@ -28,6 +28,7 @@ class HomeShell extends StatelessWidget {
       stream: Supabase.instance.client.auth.onAuthStateChange,
       builder: (context, snapshot) {
         final session = Supabase.instance.client.auth.currentSession;
+        // Marketing landing (WelcomeWebFlow) is web-only; Android / iOS go straight to sign-in.
         if (session == null) return kIsWeb ? const WelcomeWebFlow() : const LoginScreen();
         return const _HomeAuthenticated();
       },

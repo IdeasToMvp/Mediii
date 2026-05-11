@@ -1306,7 +1306,18 @@ app.delete("/api/medicine-schedules/:id", requireUser, async (req, res) => {
 });
 
 const APP_RELEASES_PUBLIC_FIELDS =
-  "id, platform, version_label, version_code, channel, release_notes, apk_filename, apk_byte_size, apk_sha256_hex, created_at, apk_download_url";
+  "id, platform, version_label, version_code, channel, release_notes, apk_filename, apk_byte_size, apk_sha256_hex, created_at, apk_download_url, update_mandatory";
+
+/**
+ * multipart / JSON: update_mandatory true | false | "1" | "0"
+ * @param {unknown} raw
+ */
+function parseUpdateMandatory(raw) {
+  if (raw === undefined || raw === null) return false;
+  if (typeof raw === "boolean") return raw;
+  const s = String(raw).trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes" || s === "on";
+}
 
 /**
  * Prefer Google Drive `uc?export=download` URLs; keep other https links as-is (trim + strip hash).
@@ -1358,33 +1369,61 @@ function parseBuildPlatform(raw) {
   return "android";
 }
 
+function getReleaseUploadSecret() {
+  const a = process.env.APK_ADMIN_UPLOAD_TOKEN?.trim();
+  const b = process.env.UPLOAD_RELEASE_API_KEY?.trim();
+  return a || b || "";
+}
+
+/** @returns {string} */
+function headerString(req, name) {
+  const v = req.headers[name];
+  const s = Array.isArray(v) ? v[0] : v;
+  return String(s ?? "").trim();
+}
+
+/** @returns {string} */
+function extractProvidedUploadCredential(req) {
+  const bearer = headerString(req, "authorization");
+  if (/^Bearer\s+/i.test(bearer)) {
+    const t = bearer.replace(/^Bearer\s+/i, "").trim();
+    if (t) return t;
+  }
+  let v = headerString(req, "x-upload-api-key");
+  if (v) return v;
+  v =
+    headerString(req, "x-admin-upload-token") ||
+    headerString(req, "x-apk-admin-token");
+  return v || "";
+}
+
 function requireApkAdminUploadToken(req, res, next) {
-  const expected = process.env.APK_ADMIN_UPLOAD_TOKEN?.trim();
+  const expected = getReleaseUploadSecret();
   if (!expected) {
     res.status(503).json({
       error: "apk_admin_disabled",
-      detail: "Set APK_ADMIN_UPLOAD_TOKEN in the server environment to enable admin APK / link releases.",
+      detail:
+        "Set APK_ADMIN_UPLOAD_TOKEN or UPLOAD_RELEASE_API_KEY to enable release uploads (/api/admin/app-releases …).",
     });
     return;
   }
-  const header = req.headers["x-admin-upload-token"] || req.headers["x-apk-admin-token"] || "";
-  const got = Array.isArray(header) ? header[0] : header;
-  const a = String(got || "").trim();
+  const a = extractProvidedUploadCredential(req);
   const b = expected;
   if (!a || a.length !== b.length) {
     res.status(401).json({
-      error: "invalid_upload_token",
-      detail: "Send header X-Admin-Upload-Token matching APK_ADMIN_UPLOAD_TOKEN",
+      error: "missing_or_invalid_upload_key",
+      detail:
+        "Send a mandatory upload credential: header X-Upload-Api-Key, or Authorization: Bearer <token>, or X-Admin-Upload-Token matching the server secret.",
     });
     return;
   }
   try {
     if (!timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"))) {
-      res.status(401).json({ error: "invalid_upload_token" });
+      res.status(401).json({ error: "missing_or_invalid_upload_key" });
       return;
     }
   } catch {
-    res.status(401).json({ error: "invalid_upload_token" });
+    res.status(401).json({ error: "missing_or_invalid_upload_key" });
     return;
   }
   next();
@@ -1510,7 +1549,7 @@ app.get("/api/app-releases/:id/download-url", async (req, res) => {
 
 /**
  * Publish a new APK (manual / Postman). Auth: header X-Admin-Upload-Token (see APK_ADMIN_UPLOAD_TOKEN).
- * Multipart fields: apk (file), version, version_code, release_notes?, channel?, platform? / build_type? (android|ios)
+ * Multipart fields: apk (file), version, version_code, release_notes?, channel?, update_mandatory?, platform? / build_type? (android|ios)
  */
 app.post("/api/admin/app-releases", requireApkAdminUploadToken, uploadApk.single("apk"), async (req, res) => {
   try {
@@ -1555,6 +1594,7 @@ app.post("/api/admin/app-releases", requireApkAdminUploadToken, uploadApk.single
     const channel = parseReleaseChannel(req.body?.channel);
     const platform = platformFromBody(req.body);
     const notes = typeof req.body?.release_notes === "string" ? req.body.release_notes.trim().slice(0, 32000) : "";
+    const updateMandatory = parseUpdateMandatory(req.body?.update_mandatory);
 
     let origDefault = platform === "ios" ? "medisathi-release.ipa" : "medisathi-release.apk";
     let orig =
@@ -1620,6 +1660,7 @@ app.post("/api/admin/app-releases", requireApkAdminUploadToken, uploadApk.single
       version_code: versionCode,
       channel,
       release_notes: notes,
+      update_mandatory: updateMandatory,
       apk_storage_path: objectPath,
       apk_download_url: null,
       apk_filename: orig,
@@ -1657,7 +1698,7 @@ app.post("/api/admin/app-releases", requireApkAdminUploadToken, uploadApk.single
 
 /**
  * Register a release with an externally hosted artifact (HTTPS), e.g. Google Drive link to APK or IPA.
- * Body JSON: download_url, version, version_code, platform?, build_type?, release_notes?, channel?, apk_filename?, apk_byte_size?
+ * Body JSON: download_url, version, version_code, platform?, build_type?, release_notes?, channel?, update_mandatory?, apk_filename?, apk_byte_size?
  */
 app.post("/api/admin/app-releases/link", requireApkAdminUploadToken, async (req, res) => {
   try {
@@ -1714,6 +1755,7 @@ app.post("/api/admin/app-releases/link", requireApkAdminUploadToken, async (req,
     const channel = parseReleaseChannel(req.body?.channel);
     const platform = platformFromBody(req.body);
     const notes = typeof req.body?.release_notes === "string" ? req.body.release_notes.trim().slice(0, 32000) : "";
+    const updateMandatory = parseUpdateMandatory(req.body?.update_mandatory);
 
     const defaultFn = platform === "ios" ? "MediSathi.ipa" : "MediSathi.apk";
     const wantExt = platform === "ios" ? ".ipa" : ".apk";
@@ -1740,6 +1782,7 @@ app.post("/api/admin/app-releases/link", requireApkAdminUploadToken, async (req,
       version_code: versionCode,
       channel,
       release_notes: notes,
+      update_mandatory: updateMandatory,
       apk_storage_path: null,
       apk_download_url: canonical,
       apk_filename: filename,

@@ -7,6 +7,7 @@ import 'app_theme_scope.dart';
 import 'config/app_config.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_bootstrap.dart';
+import 'widgets/app_update_prompt.dart';
 
 Future<void> _exchangeOAuthCodeOnWeb() async {
   if (!kIsWeb) return;
@@ -64,10 +65,12 @@ class MediBuddyApp extends StatefulWidget {
 
 class _MediBuddyAppState extends State<MediBuddyApp> {
   ThemeMode _themeMode = ThemeMode.light;
+  final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
     super.initState();
+    AppUpdatePrompt.scheduleAfterSplash(_rootNavigatorKey);
     SharedPreferences.getInstance().then((p) {
       if (!mounted) return;
       if (p.getBool('pref_dark_mode') == true) {
@@ -90,6 +93,7 @@ class _MediBuddyAppState extends State<MediBuddyApp> {
     );
     return MaterialApp(
       title: 'MediSathi',
+      navigatorKey: _rootNavigatorKey,
       theme: AppTheme.mobileFirst(),
       darkTheme: AppTheme.mobileFirstDark(),
       themeMode: _themeMode,

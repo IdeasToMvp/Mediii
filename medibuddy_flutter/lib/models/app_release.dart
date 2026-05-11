@@ -10,6 +10,7 @@ class AppRelease {
     this.apkByteSize,
     this.apkSha256Hex,
     this.apkDownloadUrl,
+    this.updateMandatory = false,
     required this.createdAt,
   });
 
@@ -25,6 +26,8 @@ class AppRelease {
   final String? apkSha256Hex;
   /// HTTPS link when not using Storage.
   final String? apkDownloadUrl;
+  /// When true, app should treat the update as required (blocking prompt).
+  final bool updateMandatory;
   final DateTime createdAt;
 
   Uri? get resolvedLaunchUri {
@@ -47,6 +50,7 @@ class AppRelease {
       apkByteSize: sz == null ? null : (sz as num).toInt(),
       apkSha256Hex: json['apk_sha256_hex'] as String?,
       apkDownloadUrl: json['apk_download_url'] as String?,
+      updateMandatory: json['update_mandatory'] == true,
       createdAt: DateTime.parse(created as String),
     );
   }
