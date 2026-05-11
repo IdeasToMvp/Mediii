@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/medisathi_colors.dart';
+import '../widgets/medisathi_logo.dart';
 
 /// Initial loading experience: gradient, mark, tagline, encryption note, progress.
 class SplashScreen extends StatefulWidget {
@@ -67,21 +68,26 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const _MedicalMark(),
-                        const SizedBox(height: 28),
-                        Text(
-                          'MediSathi',
-                          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.5,
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(22),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.2),
+                                blurRadius: 28,
+                                offset: const Offset(0, 12),
                               ),
+                            ],
+                          ),
+                          child: MediSathiLogo(height: MediaQuery.sizeOf(context).shortestSide < 380 ? 100 : 118),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 28),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 40),
                           child: Text(
-                            "Digital Peace of Mind for your Family's Health Records.",
+                            'Digital peace of mind for your family’s health records.',
                             textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                                   color: Colors.white.withValues(alpha: 0.92),
@@ -129,33 +135,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
             },
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _MedicalMark extends StatelessWidget {
-  const _MedicalMark();
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 96,
-      height: 96,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Icon(
-        Icons.medical_services_rounded,
-        size: 52,
-        color: MediSathiColors.splashBlue,
       ),
     );
   }

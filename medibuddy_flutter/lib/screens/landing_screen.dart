@@ -4,6 +4,8 @@ import '../theme/medisathi_colors.dart';
 import '../widgets/android_release_download_panel.dart';
 import '../widgets/app_release_download_launcher.dart';
 import '../widgets/landing_top_build_downloads.dart';
+import '../widgets/landing_page_sections.dart';
+import '../widgets/medisathi_logo.dart';
 import '../services/app_release_api.dart';
 import 'login_screen.dart';
 
@@ -75,6 +77,24 @@ class _LandingScreenState extends State<LandingScreen> with TickerProviderStateM
   /// One shared `/api/app-releases/latest?platform=android` load for hero strip + footer card.
   late final Future<AndroidLatestSnapshot> _androidLandingFuture;
 
+  final ScrollController _scroll = ScrollController();
+  final GlobalKey _faqKey = GlobalKey();
+  final GlobalKey _privacyKey = GlobalKey();
+  final GlobalKey _aboutKey = GlobalKey();
+  final GlobalKey _contactKey = GlobalKey();
+
+  void _scrollTo(GlobalKey key) {
+    final ctx = key.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 480),
+        curve: Curves.easeOutCubic,
+        alignment: 0.12,
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -106,6 +126,7 @@ class _LandingScreenState extends State<LandingScreen> with TickerProviderStateM
   @override
   void dispose() {
     _entrance.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -135,6 +156,7 @@ class _LandingScreenState extends State<LandingScreen> with TickerProviderStateM
           painter: _SoftGridPainter(),
           child: SafeArea(
             child: SingleChildScrollView(
+              controller: _scroll,
               physics: const BouncingScrollPhysics(),
               child: Align(
                 alignment: Alignment.topCenter,
@@ -199,6 +221,7 @@ class _LandingScreenState extends State<LandingScreen> with TickerProviderStateM
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _buildNav(context, cw),
+                            _buildNavLinks(context, wideHero),
                             SizedBox(height: wideHero ? 24 : (cw < 400 ? 16 : 20)),
                             if (!wideHero) ...[
                               heroBlock,
@@ -239,7 +262,35 @@ class _LandingScreenState extends State<LandingScreen> with TickerProviderStateM
                             FadeTransition(opacity: _gridT, child: _TrustStrip()),
                             const SizedBox(height: 40),
                             FadeTransition(opacity: _gridT, child: AndroidReleaseDownloadPanel(sharedSnapshotFuture: _androidLandingFuture)),
-                            const SizedBox(height: 48),
+                            const SizedBox(height: 40),
+                            FadeTransition(
+                              opacity: _gridT,
+                              child: _InfoSectionCard(
+                                child: LandingFaqSection(key: _faqKey),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            FadeTransition(
+                              opacity: _gridT,
+                              child: _InfoSectionCard(
+                                child: LandingPrivacySection(key: _privacyKey),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            FadeTransition(
+                              opacity: _gridT,
+                              child: _InfoSectionCard(
+                                child: LandingAboutSection(key: _aboutKey),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            FadeTransition(
+                              opacity: _gridT,
+                              child: _InfoSectionCard(
+                                child: LandingContactSection(key: _contactKey),
+                              ),
+                            ),
+                            const SizedBox(height: 32),
                             const _FooterMini(),
                           ],
                         ),
@@ -255,45 +306,55 @@ class _LandingScreenState extends State<LandingScreen> with TickerProviderStateM
     );
   }
 
+  Widget _buildNavLinks(BuildContext context, bool wideHero) {
+    final muted = MediSathiColors.mutedText.withValues(alpha: 0.82);
+    Widget link(String label, GlobalKey k) {
+      return TextButton(
+        onPressed: () => _scrollTo(k),
+        style: TextButton.styleFrom(
+          foregroundColor: MediSathiColors.brandTeal,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        alignment: wideHero ? WrapAlignment.start : WrapAlignment.center,
+        spacing: 0,
+        runSpacing: 4,
+        children: [
+          link('FAQ', _faqKey),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('·', style: TextStyle(color: muted, fontSize: 14, height: 1)),
+          ),
+          link('Privacy', _privacyKey),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('·', style: TextStyle(color: muted, fontSize: 14, height: 1)),
+          ),
+          link('About', _aboutKey),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('·', style: TextStyle(color: muted, fontSize: 14, height: 1)),
+          ),
+          link('Contact', _contactKey),
+        ],
+      ),
+    );
+  }
+
   Widget _buildNav(BuildContext context, double contentWidth) {
     void goSignIn() => widget.onRequestSignIn();
 
     /// Sign-in lives in the app bar only; hero focuses on installs + trust copy.
     final iconOnlySignIn = contentWidth < 364;
-
-    Widget logoMark() {
-      return Container(
-        padding: const EdgeInsets.all(11),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [MediSathiColors.brandBlue, MediSathiColors.brandBlue.withBlue(220)],
-          ),
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: MediSathiColors.brandBlue.withValues(alpha: 0.28),
-              blurRadius: 18,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        child: const Icon(Icons.monitor_heart_rounded, color: Colors.white, size: 26),
-      );
-    }
-
-    Widget title() {
-      final compact = contentWidth < 400;
-      return Text(
-        'MediSathi',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: (compact ? Theme.of(context).textTheme.titleLarge : Theme.of(context).textTheme.headlineSmall)?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: const Color(0xFF1E3A5F),
-              letterSpacing: -0.6,
-            ),
-      );
-    }
 
     Widget signInControl() {
       if (iconOnlySignIn) {
@@ -322,15 +383,58 @@ class _LandingScreenState extends State<LandingScreen> with TickerProviderStateM
       );
     }
 
+    Widget logoRow() {
+      return Expanded(
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: MediSathiLogo(height: iconOnlySignIn ? 34 : 42),
+          ),
+        ),
+      );
+    }
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        logoMark(),
-        const SizedBox(width: 12),
-        Expanded(child: title()),
+        logoRow(),
         const SizedBox(width: 8),
         signInControl(),
       ],
+    );
+  }
+}
+
+/// Soft card wrapper for FAQ / legal / contact blocks.
+class _InfoSectionCard extends StatelessWidget {
+  const _InfoSectionCard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.88),
+      elevation: 0,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.95)),
+          boxShadow: [
+            BoxShadow(
+              color: MediSathiColors.brandBlue.withValues(alpha: 0.06),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: child,
+      ),
     );
   }
 }
@@ -379,8 +483,8 @@ class _HeroBlock extends StatelessWidget {
           if (badgeCentered) Center(child: badge) else badge,
           const SizedBox(height: 22),
           ShaderMask(
-            shaderCallback: (bounds) => const LinearGradient(
-              colors: [Color(0xFF172554), Color(0xFF2563EB)],
+            shaderCallback: (bounds) => LinearGradient(
+              colors: [MediSathiColors.brandTeal, MediSathiColors.brandBlue],
             ).createShader(bounds),
             blendMode: BlendMode.srcIn,
             child: Text(

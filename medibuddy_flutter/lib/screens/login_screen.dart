@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/app_config.dart';
 import '../theme/medisathi_colors.dart';
 import '../widgets/android_release_download_panel.dart';
+import '../widgets/medisathi_logo.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, this.onBack});
@@ -55,6 +56,7 @@ class _LoginScreenState extends State<LoginScreen> {
           letterSpacing: -0.3,
         );
     final hintStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(color: MediSathiColors.mutedText);
+    final narrowLogo = MediaQuery.sizeOf(context).width < 400;
 
     return Scaffold(
       backgroundColor: MediSathiColors.pageLavender,
@@ -98,24 +100,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: MediSathiColors.brandBlue,
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Icon(Icons.add_rounded, color: Colors.white, size: 32),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'MediSathi',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                color: MediSathiColors.brandBlue,
-                                letterSpacing: -0.2,
-                              ),
-                        ),
+                        MediSathiLogo(height: narrowLogo ? 44 : 52),
                       ],
                     ),
                     const SizedBox(height: 36),

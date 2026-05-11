@@ -1,6 +1,6 @@
 {
   "name": "medibuddy-api",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MediBuddy API — prescription analysis (OpenAI) and Supabase storage",
   "main": "src/server.js",
   "type": "module",
