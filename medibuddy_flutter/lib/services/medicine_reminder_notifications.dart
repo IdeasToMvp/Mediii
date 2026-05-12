@@ -64,6 +64,8 @@ class MedicineReminderNotifications {
     if (Platform.isAndroid) {
       final androidImpl = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
       await androidImpl?.requestNotificationsPermission();
+      // Exact-time reminders need SCHEDULE_EXACT_ALARM; without it, zonedSchedule with exactAllowWhileIdle fails on Android 12+.
+      await androidImpl?.requestExactAlarmsPermission();
     } else if (Platform.isIOS) {
       await _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()?.requestPermissions(
             alert: true,
@@ -80,8 +82,9 @@ class MedicineReminderNotifications {
     await ensureInitialized();
     if (Platform.isAndroid) {
       final androidImpl = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-      final granted = await androidImpl?.requestNotificationsPermission();
-      return granted ?? false;
+      final notifOk = await androidImpl?.requestNotificationsPermission() ?? false;
+      await androidImpl?.requestExactAlarmsPermission();
+      return notifOk;
     }
     if (Platform.isIOS) {
       final r = await _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()?.requestPermissions(
@@ -122,6 +125,16 @@ class MedicineReminderNotifications {
     const iosDetails = DarwinNotificationDetails();
     final details = NotificationDetails(android: androidDetails, iOS: iosDetails);
 
+    AndroidScheduleMode androidMode = AndroidScheduleMode.exactAllowWhileIdle;
+    if (Platform.isAndroid) {
+      final androidImpl = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      final canExact = await androidImpl?.canScheduleExactNotifications();
+      if (canExact == false) {
+        // Still schedules; delivery may be a few minutes late without exact-alarm permission.
+        androidMode = AndroidScheduleMode.inexactAllowWhileIdle;
+      }
+    }
+
     final now = tz.TZDateTime.now(tz.local);
 
     for (final o in occurrences) {
@@ -159,7 +172,7 @@ class MedicineReminderNotifications {
             t.body,
             t.at,
             details,
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+            androidScheduleMode: androidMode,
             payload: key,
           );
         } catch (e, st) {
