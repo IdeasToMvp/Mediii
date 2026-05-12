@@ -7,7 +7,6 @@ import 'app_theme_scope.dart';
 import 'config/app_config.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_bootstrap.dart';
-import 'widgets/app_update_prompt.dart';
 
 Future<void> _exchangeOAuthCodeOnWeb() async {
   if (!kIsWeb) return;
@@ -40,7 +39,8 @@ MediaQueryData _nonNegativeViewInsets(MediaQueryData mq) {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (AppConfig.supabaseUrl.trim().isEmpty || AppConfig.supabaseAnonKey.trim().isEmpty) {
+  if (AppConfig.supabaseUrl.trim().isEmpty ||
+      AppConfig.supabaseAnonKey.trim().isEmpty) {
     runApp(const _MissingSupabaseConfigApp());
     return;
   }
@@ -48,7 +48,9 @@ void main() async {
   await Supabase.initialize(
     url: AppConfig.supabaseUrl.trim(),
     anonKey: AppConfig.supabaseAnonKey.trim(),
-    authOptions: const FlutterAuthClientOptions(authFlowType: AuthFlowType.pkce),
+    authOptions: const FlutterAuthClientOptions(
+      authFlowType: AuthFlowType.pkce,
+    ),
   );
 
   await _exchangeOAuthCodeOnWeb();
@@ -65,12 +67,10 @@ class MediBuddyApp extends StatefulWidget {
 
 class _MediBuddyAppState extends State<MediBuddyApp> {
   ThemeMode _themeMode = ThemeMode.light;
-  final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
     super.initState();
-    AppUpdatePrompt.scheduleAfterSplash(_rootNavigatorKey);
     SharedPreferences.getInstance().then((p) {
       if (!mounted) return;
       if (p.getBool('pref_dark_mode') == true) {
@@ -81,7 +81,9 @@ class _MediBuddyAppState extends State<MediBuddyApp> {
 
   void _setDarkMode(bool dark) {
     setState(() => _themeMode = dark ? ThemeMode.dark : ThemeMode.light);
-    SharedPreferences.getInstance().then((p) => p.setBool('pref_dark_mode', dark));
+    SharedPreferences.getInstance().then(
+      (p) => p.setBool('pref_dark_mode', dark),
+    );
   }
 
   @override
@@ -93,16 +95,20 @@ class _MediBuddyAppState extends State<MediBuddyApp> {
     );
     return MaterialApp(
       title: 'MediSathi',
-      navigatorKey: _rootNavigatorKey,
       theme: AppTheme.mobileFirst(),
       darkTheme: AppTheme.mobileFirstDark(),
       themeMode: _themeMode,
       builder: (context, child) {
-        return MediaQuery(data: _nonNegativeViewInsets(MediaQuery.of(context)), child: child ?? const SizedBox.shrink());
+        return MediaQuery(
+          data: _nonNegativeViewInsets(MediaQuery.of(context)),
+          child: child ?? const SizedBox.shrink(),
+        );
       },
       // Native: phone-width shell everywhere. Web: outer shell is full viewport so the marketing
       // landing can use the full screen; [HomeShell] / [WelcomeWebFlow] sign-in constrain in-app UI to ~640px.
-      home: kIsWeb ? appRoot : AppTheme.constrainMobileWidth(maxWidth: 640, child: appRoot),
+      home: kIsWeb
+          ? appRoot
+          : AppTheme.constrainMobileWidth(maxWidth: 640, child: appRoot),
     );
   }
 }
@@ -116,7 +122,10 @@ class _MissingSupabaseConfigApp extends StatelessWidget {
       title: 'MediSathi',
       theme: AppTheme.mobileFirst(),
       builder: (context, child) {
-        return MediaQuery(data: _nonNegativeViewInsets(MediaQuery.of(context)), child: child ?? const SizedBox.shrink());
+        return MediaQuery(
+          data: _nonNegativeViewInsets(MediaQuery.of(context)),
+          child: child ?? const SizedBox.shrink(),
+        );
       },
       home: kIsWeb
           ? Scaffold(

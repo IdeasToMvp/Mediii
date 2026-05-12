@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/prescription.dart';
 import '../services/medibuddy_api.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_update_prompt.dart';
 import '../widgets/family_member_bottom_sheet.dart';
 import '../widgets/medisathi_loader.dart';
 import '../widgets/prescription_detail_sheet.dart';
@@ -25,20 +26,51 @@ class HomeShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<AuthState>(
-      stream: Supabase.instance.client.auth.onAuthStateChange,
-      builder: (context, snapshot) {
-        final session = Supabase.instance.client.auth.currentSession;
-        // Marketing landing (WelcomeWebFlow) is web-only; Android / iOS go straight to sign-in.
-        if (session == null) return kIsWeb ? const WelcomeWebFlow() : const LoginScreen();
-        // Web: landing stays full viewport; authenticated app mirrors phone layout.
-        if (kIsWeb) {
-          return AppTheme.constrainMobileWidth(maxWidth: 640, child: const _HomeAuthenticated());
-        }
-        return const _HomeAuthenticated();
-      },
+    return _ShellUpdateTrigger(
+      child: StreamBuilder<AuthState>(
+        stream: Supabase.instance.client.auth.onAuthStateChange,
+        builder: (context, snapshot) {
+          final session = Supabase.instance.client.auth.currentSession;
+          // Marketing landing (WelcomeWebFlow) is web-only; Android / iOS go straight to sign-in.
+          if (session == null) {
+            return kIsWeb ? const WelcomeWebFlow() : const LoginScreen();
+          }
+          // Web: landing stays full viewport; authenticated app mirrors phone layout.
+          if (kIsWeb) {
+            return AppTheme.constrainMobileWidth(
+              maxWidth: 640,
+              child: const _HomeAuthenticated(),
+            );
+          }
+          return const _HomeAuthenticated();
+        },
+      ),
     );
   }
+}
+
+/// First time the post-bootstrap shell is in the tree: call release API vs [PackageInfo.buildNumber].
+class _ShellUpdateTrigger extends StatefulWidget {
+  const _ShellUpdateTrigger({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_ShellUpdateTrigger> createState() => _ShellUpdateTriggerState();
+}
+
+class _ShellUpdateTriggerState extends State<_ShellUpdateTrigger> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      AppUpdatePrompt.scheduleWhenShellReady(context);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class _HomeSnapshot {
@@ -60,9 +92,8 @@ class _HomeSnapshot {
 
   String displayName([String? emailFallback]) {
     final p = me?['profile'];
-    final dn =
-        (p is Map && p['display_name'] != null) ?
-            p['display_name'].toString().trim()
+    final dn = (p is Map && p['display_name'] != null)
+        ? p['display_name'].toString().trim()
         : '';
     if (dn.isNotEmpty) return dn;
     final em = emailFallback ?? '';
@@ -88,9 +119,10 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     final meRaw = await _api.getMe();
     final occurrences = await _api.fetchUpcomingMedicineOccurrences(days: 3);
     final famWrap = await _api.listFamilyPayload();
-    final famList =
-        famWrap['members'] is List ?
-            (famWrap['members'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList()
+    final famList = famWrap['members'] is List
+        ? (famWrap['members'] as List)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList()
         : <Map<String, dynamic>>[];
     final rxMaps = await _api.listPrescriptions(kind: 'prescription');
     final repMaps = await _api.listPrescriptions(kind: 'report');
@@ -154,7 +186,9 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     } catch (_) {}
     if (!mounted) return;
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => UploadPrescriptionScreen(planSlug: slug)),
+      MaterialPageRoute(
+        builder: (_) => UploadPrescriptionScreen(planSlug: slug),
+      ),
     );
     if (saved == true && mounted) await _reload();
   }
@@ -171,10 +205,14 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
         notes: draft.notes,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Family member added.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Family member added.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not add: ${_shortNetworkError(e)}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not add: ${_shortNetworkError(e)}')),
+      );
     }
     await _reload();
   }
@@ -192,7 +230,9 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
 
   Future<void> _openEditPrescription(Prescription p) async {
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => AddPrescriptionManualScreen(prescriptionId: p.id)),
+      MaterialPageRoute(
+        builder: (_) => AddPrescriptionManualScreen(prescriptionId: p.id),
+      ),
     );
     if (saved == true && mounted) await _reload();
   }
@@ -208,10 +248,15 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
               : 'This prescription and its generated reminder links will be removed.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: Theme.of(ctx).colorScheme.error),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(ctx).colorScheme.error,
+            ),
             child: const Text('Delete'),
           ),
         ],
@@ -221,10 +266,14 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     try {
       await _api.deletePrescription(p.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deleted.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Deleted.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete: ${_shortNetworkError(e)}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete: ${_shortNetworkError(e)}')),
+      );
     }
     await _reload();
   }
@@ -233,7 +282,10 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     final id = member['id']?.toString() ?? '';
     if (id.isEmpty) return;
 
-    final draft = await showFamilyMemberEditorSheet(context, initial: FamilyMemberDraft.fromApiRow(member));
+    final draft = await showFamilyMemberEditorSheet(
+      context,
+      initial: FamilyMemberDraft.fromApiRow(member),
+    );
     if (draft == null || !mounted) return;
 
     try {
@@ -248,15 +300,21 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
         clearNotes: draft.clearNotes,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Family member updated.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Family member updated.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not update: ${_shortNetworkError(e)}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update: ${_shortNetworkError(e)}')),
+      );
     }
     await _reload();
   }
 
-  Future<void> _deleteFamilyMemberAfterConfirm(Map<String, dynamic> member) async {
+  Future<void> _deleteFamilyMemberAfterConfirm(
+    Map<String, dynamic> member,
+  ) async {
     final id = member['id']?.toString() ?? '';
     final label = (member['display_name'] ?? '').toString();
     if (id.isEmpty) return;
@@ -265,12 +323,21 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Remove family member?'),
-        content: Text(label.isEmpty ? 'This profile will be removed.' : 'Remove $label from your household?'),
+        content: Text(
+          label.isEmpty
+              ? 'This profile will be removed.'
+              : 'Remove $label from your household?',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: Theme.of(ctx).colorScheme.error),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(ctx).colorScheme.error,
+            ),
             child: const Text('Remove'),
           ),
         ],
@@ -280,10 +347,14 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     try {
       await _api.deleteFamilyMember(id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Family member removed.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Family member removed.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not remove: ${_shortNetworkError(e)}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not remove: ${_shortNetworkError(e)}')),
+      );
     }
     await _reload();
   }
@@ -315,7 +386,9 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
             ListTile(
               leading: const Icon(Icons.document_scanner_outlined),
               title: const Text('Upload & analyze'),
-              subtitle: const Text('Photo → AI classify → prescription or report → save'),
+              subtitle: const Text(
+                'Photo → AI classify → prescription or report → save',
+              ),
               onTap: () => Navigator.pop(context, 'upload'),
             ),
           ],
@@ -350,13 +423,17 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
           if (snap.hasError) {
             final err = snap.error!;
             final errText = _shortNetworkError(err);
-            final suggestInAppBrowser = kIsWeb && errText.contains('Load failed');
+            final suggestInAppBrowser =
+                kIsWeb && errText.contains('Load failed');
             return Padding(
               padding: const EdgeInsets.all(22),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('Could not load dashboard data.', style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'Could not load dashboard data.',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 8),
                   Text(errText, style: Theme.of(context).textTheme.bodySmall),
                   if (suggestInAppBrowser) ...[
@@ -364,14 +441,19 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                     Text(
                       'Links opened inside chat apps sometimes block loading the API. Open this site in Safari or Chrome instead, then tap Retry.',
                       textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.35),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(height: 1.35),
                     ),
                   ],
                   const SizedBox(height: 14),
                   FilledButton(onPressed: _reload, child: const Text('Retry')),
                   if (userEmail != null) ...[
                     const SizedBox(height: 28),
-                    Text('Signed in as $userEmail', style: Theme.of(context).textTheme.bodySmall),
+                    Text(
+                      'Signed in as $userEmail',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ],
                 ],
               ),
@@ -383,9 +465,8 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
           final displayName = data.displayName(userEmail);
           final mergedDocs = _documentsSorted(data);
           final planRaw = data.me?['plan'];
-          final planSlug =
-              planRaw is Map && planRaw['slug'] != null ?
-                  planRaw['slug'].toString().trim().toLowerCase()
+          final planSlug = planRaw is Map && planRaw['slug'] != null
+              ? planRaw['slug'].toString().trim().toLowerCase()
               : 'free';
 
           return IndexedStack(
@@ -442,7 +523,11 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                       icon: const Icon(Icons.notifications_outlined),
                       onPressed: () {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Notification center is coming soon.')),
+                          const SnackBar(
+                            content: Text(
+                              'Notification center is coming soon.',
+                            ),
+                          ),
                         );
                       },
                     ),
@@ -464,7 +549,8 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                         MaterialPageRoute(
                           builder: (_) => EditProfileScreen(
                             api: _api,
-                            initialProfile: data.me?['profile'] as Map<String, dynamic>?,
+                            initialProfile:
+                                data.me?['profile'] as Map<String, dynamic>?,
                             displayFallback: displayName,
                           ),
                         ),
@@ -478,21 +564,35 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
           );
         },
       ),
-      floatingActionButton: (_tabIndex == 0 || _tabIndex == 1) ?
-          FloatingActionButton.extended(onPressed: _pickAddFlow, icon: const Icon(Icons.add_rounded), label: const Text('Add'))
-      : null,
+      floatingActionButton: (_tabIndex == 0 || _tabIndex == 1)
+          ? FloatingActionButton.extended(
+              onPressed: _pickAddFlow,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add'),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex.clamp(0, 3),
         onDestinationSelected: (idx) => setState(() => _tabIndex = idx),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'HOME'),
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: 'HOME',
+          ),
           NavigationDestination(
             icon: Icon(Icons.folder_copy_outlined),
             selectedIcon: Icon(Icons.folder_copy_rounded),
             label: 'RECORDS',
           ),
-          NavigationDestination(icon: Icon(Icons.schedule_outlined), label: 'REMINDERS'),
-          NavigationDestination(icon: Icon(Icons.person_outline), label: 'PROFILE'),
+          NavigationDestination(
+            icon: Icon(Icons.schedule_outlined),
+            label: 'REMINDERS',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            label: 'PROFILE',
+          ),
         ],
       ),
     );
