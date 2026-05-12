@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/prescription.dart';
 import '../services/medibuddy_api.dart';
+import '../theme/app_theme.dart';
 import '../widgets/family_member_bottom_sheet.dart';
 import '../widgets/medisathi_loader.dart';
 import '../widgets/prescription_detail_sheet.dart';
@@ -30,6 +31,10 @@ class HomeShell extends StatelessWidget {
         final session = Supabase.instance.client.auth.currentSession;
         // Marketing landing (WelcomeWebFlow) is web-only; Android / iOS go straight to sign-in.
         if (session == null) return kIsWeb ? const WelcomeWebFlow() : const LoginScreen();
+        // Web: landing stays full viewport; authenticated app mirrors phone layout.
+        if (kIsWeb) {
+          return AppTheme.constrainMobileWidth(maxWidth: 640, child: const _HomeAuthenticated());
+        }
         return const _HomeAuthenticated();
       },
     );

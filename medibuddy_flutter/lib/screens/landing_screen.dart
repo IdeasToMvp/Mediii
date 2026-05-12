@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import '../theme/medisathi_colors.dart';
 import '../widgets/android_release_download_panel.dart';
 import '../widgets/app_release_download_launcher.dart';
@@ -44,8 +45,11 @@ class _WelcomeWebFlowState extends State<WelcomeWebFlow> {
       child: _showLogin
           ? KeyedSubtree(
               key: const ValueKey('login'),
-              child: LoginScreen(
-                onBack: () => setState(() => _showLogin = false),
+              child: AppTheme.constrainMobileWidth(
+                maxWidth: 640,
+                child: LoginScreen(
+                  onBack: () => setState(() => _showLogin = false),
+                ),
               ),
             )
           : KeyedSubtree(

@@ -8,7 +8,8 @@ import '../screens/splash_screen.dart';
 import '../services/onboarding_prefs.dart';
 import 'medisathi_loader.dart';
 
-/// Cold start (signed out): splash → onboarding (first launch) → [HomeShell].
+/// Cold start (signed out): native → splash → onboarding (first launch) → [HomeShell].
+/// Web signed out: no splash, no onboarding → [HomeShell] (landing + sign-in funnel).
 /// Signed in: [HomeShell] directly.
 class AppBootstrap extends StatefulWidget {
   const AppBootstrap({super.key});
@@ -30,9 +31,13 @@ class _AppBootstrapState extends State<AppBootstrap> {
     if (_signedIn) {
       return;
     }
-    // Web: skip timed splash — go straight into landing / onboarding funnel.
+    // Web: skip splash and onboarding; HomeShell shows marketing landing.
     _showSplash = !kIsWeb;
-    _loadOnboardingFlag();
+    if (kIsWeb) {
+      _onboardingComplete = true;
+    } else {
+      _loadOnboardingFlag();
+    }
   }
 
   Future<void> _loadOnboardingFlag() async {

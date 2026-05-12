@@ -100,7 +100,8 @@ class _MediBuddyAppState extends State<MediBuddyApp> {
       builder: (context, child) {
         return MediaQuery(data: _nonNegativeViewInsets(MediaQuery.of(context)), child: child ?? const SizedBox.shrink());
       },
-      // Web should use the full viewport like a normal site; native apps stay in a phone-width shell.
+      // Native: phone-width shell everywhere. Web: outer shell is full viewport so the marketing
+      // landing can use the full screen; [HomeShell] / [WelcomeWebFlow] sign-in constrain in-app UI to ~640px.
       home: kIsWeb ? appRoot : AppTheme.constrainMobileWidth(maxWidth: 640, child: appRoot),
     );
   }
