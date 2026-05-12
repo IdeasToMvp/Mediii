@@ -59,13 +59,15 @@ abstract final class AppUpdatePrompt {
     if (nav == null || !nav.mounted) return;
     final dlgCtx = nav.overlay?.context ?? navigatorKey.currentContext;
     if (dlgCtx == null || !dlgCtx.mounted) return;
-    await showDialog<void>(
+
+    final result = await showDialog<String>(
       context: dlgCtx,
+      // Scrim / Android back close with result `null` → same prefs as "Later" for optional updates.
       barrierDismissible: !release.updateMandatory,
       useRootNavigator: true,
       builder: (dialogContext) {
         final pub = DateFormat.yMMMd().format(release.createdAt.toLocal());
-        return AlertDialog(
+        final alert = AlertDialog(
           title: Row(
             children: [
               Icon(Icons.system_update_alt_rounded, color: Theme.of(dialogContext).colorScheme.primary),
@@ -109,24 +111,28 @@ abstract final class AppUpdatePrompt {
           actions: [
             if (!release.updateMandatory)
               TextButton(
-                onPressed: () async {
-                  await prefs.setInt(_prefDismissedVc, release.versionCode);
-                  if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-                },
+                onPressed: () => Navigator.of(dialogContext).pop('later'),
                 child: const Text('Later'),
               ),
             FilledButton(
-              onPressed: () async {
-                Navigator.of(dialogContext).pop();
-                if (navigatorKey.currentContext?.mounted ?? false) {
-                  await AppReleaseDownloadLauncher.launchAndroid(navigatorKey.currentContext!, release);
-                }
-              },
+              onPressed: () => Navigator.of(dialogContext).pop('download'),
               child: const Text('Download update'),
             ),
           ],
         );
+
+        if (release.updateMandatory) {
+          return PopScope(canPop: false, child: alert);
+        }
+        return alert;
       },
     );
+
+    if (!release.updateMandatory && result != 'download') {
+      await prefs.setInt(_prefDismissedVc, release.versionCode);
+    }
+    if (result == 'download' && (navigatorKey.currentContext?.mounted ?? false)) {
+      await AppReleaseDownloadLauncher.launchAndroid(navigatorKey.currentContext!, release);
+    }
   }
 }
