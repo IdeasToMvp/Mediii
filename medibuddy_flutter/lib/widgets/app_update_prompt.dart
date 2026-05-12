@@ -7,7 +7,6 @@ import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../config/app_config.dart';
 import '../models/app_release.dart';
 import '../services/app_release_api.dart';
 import 'android_release_download_panel.dart';
@@ -35,11 +34,10 @@ abstract final class AppUpdatePrompt {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     if (!AndroidReleaseDownloadPanel.offerApkHere) return;
 
-    late final PackageInfo pkg;
     int localVc = 0;
     try {
-      pkg = await PackageInfo.fromPlatform();
-      localVc = int.tryParse(pkg.buildNumber.trim()) ?? 0;
+      final info = await PackageInfo.fromPlatform();
+      localVc = int.tryParse(info.buildNumber.trim()) ?? 0;
     } catch (_) {
       return;
     }
@@ -81,37 +79,6 @@ abstract final class AppUpdatePrompt {
       useRootNavigator: true,
       builder: (dialogContext) {
         final pub = DateFormat.yMMMd().format(release.createdAt.toLocal());
-        final detailStyle = Theme.of(dialogContext).textTheme.bodySmall
-            ?.copyWith(
-              height: 1.38,
-              fontFamily: 'monospace',
-              fontSize:
-                  (Theme.of(dialogContext).textTheme.bodySmall?.fontSize ??
-                      12) -
-                  0.5,
-            );
-        final detailBuf = StringBuffer()
-          ..writeln('INSTALLED (PackageInfo)')
-          ..writeln('  app: ${pkg.appName}')
-          ..writeln('  package: ${pkg.packageName}')
-          ..writeln('  versionName: ${pkg.version}')
-          ..writeln('  versionCode string: "${pkg.buildNumber}"')
-          ..writeln('  versionCode parsed: $localVc')
-          ..writeln('')
-          ..writeln('API /api/app-releases/latest')
-          ..writeln('  release id: ${release.id}')
-          ..writeln('  version_label: ${release.versionLabel}')
-          ..writeln('  version_code: ${release.versionCode}')
-          ..writeln('  update_mandatory: ${release.updateMandatory}')
-          ..writeln('  channel: ${release.channel}')
-          ..writeln(
-            '  created_at (UTC): ${release.createdAt.toUtc().toIso8601String()}',
-          )
-          ..writeln('  created_at (shown): $pub')
-          ..writeln('')
-          ..writeln('Client config')
-          ..writeln('  AppConfig.apiBaseUrl: ${AppConfig.apiBaseUrl}');
-
         final alert = AlertDialog(
           title: Row(
             children: [
@@ -148,28 +115,6 @@ abstract final class AppUpdatePrompt {
                   style: Theme.of(
                     dialogContext,
                   ).textTheme.bodyMedium?.copyWith(height: 1.42),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  'Technical details (for debugging)',
-                  style: Theme.of(
-                    dialogContext,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Theme.of(
-                      dialogContext,
-                    ).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: SelectableText(
-                    detailBuf.toString(),
-                    style: detailStyle,
-                  ),
                 ),
                 if (release.releaseNotes.trim().isNotEmpty) ...[
                   const SizedBox(height: 12),
