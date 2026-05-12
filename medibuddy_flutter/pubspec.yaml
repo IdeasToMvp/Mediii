@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # of the product and file versions while build-number is used as the build suffix.
 # ANDROID: the number after "+" is versionCode (PackageInfo.buildNumber); it must reach at least what you
 # POST as version_code to /api/admin/app-releases*. If backend is ahead, you keep seeing the update dialog at build 1.
-version: 1.0.3+202605125
+version: 1.0.3+202605126
 
 environment:
   sdk: ^3.11.5
