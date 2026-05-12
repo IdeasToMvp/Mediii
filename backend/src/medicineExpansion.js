@@ -3,7 +3,7 @@
  * Dates use calendar days in UTC; times are interpreted as UTC clock times ("HH:mm").
  */
 
-function ymFromDate(d) {
+export function ymFromDate(d) {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
   const day = String(d.getUTCDate()).padStart(2, "0");
@@ -111,6 +111,22 @@ export function expandScheduleOccurrences(sch, { fromUtc, horizonDays }) {
 
   out.sort((a, b) => (a.due_at_iso < b.due_at_iso ? -1 : 1));
   return out;
+}
+
+/**
+ * @param {Record<string, any>} sch schedule row from DB
+ * @param {string} occurrenceKey synthetic id `${scheduleId}:${dayStr}:${hm}`
+ */
+export function findOccurrenceInSchedule(sch, occurrenceKey) {
+  const key = String(occurrenceKey || "").trim();
+  const m = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):(\d{4}-\d{2}-\d{2}):(.+)$/i.exec(key);
+  if (!m) return null;
+  const dayStr = m[2];
+  const t = parseDateOnly(dayStr);
+  if (t === null) return null;
+  const fromUtc = t - 48 * 60 * 60 * 1000;
+  const list = expandScheduleOccurrences(sch, { fromUtc, horizonDays: 7 });
+  return list.find((o) => o.id === key) ?? null;
 }
 
 export function flattenUpcomingFromRows(rows, { fromUtc = Date.now(), horizonDays = 3 } = {}) {

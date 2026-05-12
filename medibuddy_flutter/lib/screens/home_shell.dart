@@ -1,11 +1,12 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/prescription.dart';
 import '../services/medibuddy_api.dart';
+import '../services/medicine_reminder_notifications.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_update_prompt.dart';
 import '../widgets/family_member_bottom_sheet.dart';
@@ -142,6 +143,9 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
   void initState() {
     super.initState();
     _future = _load();
+    _future!.then((_) async {
+      if (mounted) await _syncReminderNotifications();
+    });
   }
 
   Future<void> _reload() async {
@@ -152,6 +156,43 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
     });
     await reloadFuture;
     if (mounted) setState(() {});
+    await _syncReminderNotifications();
+  }
+
+  Future<void> _syncReminderNotifications() async {
+    if (kIsWeb || !mounted) return;
+    try {
+      await MedicineReminderNotifications.instance.ensureInitialized();
+      final occ = await _api.fetchUpcomingMedicineOccurrences(days: 14);
+      await MedicineReminderNotifications.instance.syncFromOccurrences(occ);
+    } catch (e, st) {
+      debugPrint('Reminder notification sync failed: $e\n$st');
+    }
+  }
+
+  Future<void> _markMedicineTaken(String occurrenceKey) async {
+    try {
+      await _api.markMedicineDoseTaken(occurrenceKey);
+      if (!kIsWeb) await MedicineReminderNotifications.instance.cancelForOccurrence(occurrenceKey);
+      await _reload();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked taken.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+      }
+    }
+  }
+
+  Future<void> _requestReminderNotificationPermission() async {
+    if (kIsWeb) return;
+    await MedicineReminderNotifications.instance.ensureInitialized();
+    final ok = await MedicineReminderNotifications.instance.requestPermissionsIfNeeded();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(ok ? 'Notifications enabled for medicine reminders.' : 'Permission was not granted.')),
+    );
   }
 
   List<Prescription> _documentsSorted(_HomeSnapshot d) {
@@ -487,6 +528,8 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                 onRecentPrescriptionTap: (p) => _showDetail(context, p),
                 onEditPrescription: _openEditPrescription,
                 onDeletePrescription: _deletePrescriptionAfterConfirm,
+                onMarkMedicineTaken: _markMedicineTaken,
+                onRequestNotificationsPermission: kIsWeb ? null : _requestReminderNotificationPermission,
               ),
               Scaffold(
                 appBar: AppBar(
@@ -511,6 +554,7 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                   familyMembers: data.familyMembers,
                   api: _api,
                   onRefresh: _reload,
+                  onMarkMedicineTaken: _markMedicineTaken,
                 ),
               ),
               Scaffold(
@@ -519,17 +563,13 @@ class _HomeAuthenticatedState extends State<_HomeAuthenticated> {
                   centerTitle: false,
                   actions: [
                     IconButton(
-                      tooltip: 'Notifications',
+                      tooltip: 'Reminder notifications',
                       icon: const Icon(Icons.notifications_outlined),
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Notification center is coming soon.',
-                            ),
-                          ),
-                        );
-                      },
+                      onPressed: kIsWeb
+                          ? null
+                          : () async {
+                              await _requestReminderNotificationPermission();
+                            },
                     ),
                   ],
                 ),

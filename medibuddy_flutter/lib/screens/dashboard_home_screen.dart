@@ -4,6 +4,19 @@ import 'package:intl/intl.dart';
 import '../models/prescription.dart';
 import '../theme/medisathi_colors.dart';
 
+(String label, Color fg) _adherenceLabelForDose(String? raw) {
+  switch (raw) {
+    case 'taken':
+      return ('Taken', Colors.green.shade800);
+    case 'missed':
+      return ('Missed', Colors.deepOrange.shade800);
+    case 'auto_taken':
+      return ('Missed · auto-logged', Colors.blueGrey.shade700);
+    default:
+      return ('', Colors.black54);
+  }
+}
+
 String _firstLetterUpper(String name, {String fallback = '?'}) {
   final t = name.trim();
   if (t.isEmpty) return fallback;
@@ -83,6 +96,8 @@ class DashboardHomeScreen extends StatelessWidget {
     required this.onRecentPrescriptionTap,
     required this.onEditPrescription,
     required this.onDeletePrescription,
+    required this.onMarkMedicineTaken,
+    this.onRequestNotificationsPermission,
   });
 
   final String displayName;
@@ -100,6 +115,8 @@ class DashboardHomeScreen extends StatelessWidget {
   final void Function(Prescription p) onRecentPrescriptionTap;
   final Future<void> Function(Prescription p) onEditPrescription;
   final Future<void> Function(Prescription p) onDeletePrescription;
+  final Future<void> Function(String occurrenceKey) onMarkMedicineTaken;
+  final Future<void> Function()? onRequestNotificationsPermission;
 
   static String greetingForNow() {
     final h = DateTime.now().hour;
@@ -175,10 +192,14 @@ class DashboardHomeScreen extends StatelessWidget {
                             color: Colors.white.withValues(alpha: 0.09),
                             borderRadius: BorderRadius.circular(999),
                             child: Tooltip(
-                              message: notificationsEnabled ? 'Notifications' : 'Notifications (coming soon)',
+                              message: notificationsEnabled ? 'Reminder notifications' : 'Notifications',
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(999),
-                                onTap: () {},
+                                onTap: onRequestNotificationsPermission == null
+                                    ? null
+                                    : () async {
+                                        await onRequestNotificationsPermission!();
+                                      },
                                 splashColor: MediSathiColors.neonAccent.withValues(alpha: 0.18),
                                 child: Padding(
                                   padding: const EdgeInsets.all(11),
@@ -296,6 +317,10 @@ class DashboardHomeScreen extends StatelessWidget {
                   final instruct = m['meal_instruction']?.toString().trim();
                   final iso = m['due_at_iso']?.toString();
                   final when = iso != null ? timeFmt.format(DateTime.parse(iso).toLocal()) : '—';
+                  final occId = m['id']?.toString() ?? '';
+                  final status = m['adherence_status']?.toString() ?? 'upcoming';
+                  final ad = _adherenceLabelForDose(status);
+                  final showMark = occId.isNotEmpty && status != 'taken' && status != 'auto_taken';
 
                   final colors = [
                     MediSathiColors.brandBlue,
@@ -318,56 +343,92 @@ class DashboardHomeScreen extends StatelessWidget {
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(14),
-                      child: Row(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            width: 52,
-                            height: 52,
-                            decoration: BoxDecoration(
-                              color: tint.withValues(alpha: 0.14),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Icon(Icons.medication_rounded, color: tint, size: 28),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  dosage.isEmpty ? name : '$name · $dosage',
-                                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: tint.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(14),
                                 ),
-                                if (instruct != null && instruct.isNotEmpty) ...[
-                                  const SizedBox(height: 6),
-                                  Text(instruct, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                                ],
-                              ],
-                            ),
+                                child: Icon(Icons.medication_rounded, color: tint, size: 28),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      dosage.isEmpty ? name : '$name · $dosage',
+                                      style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                                    ),
+                                    if (instruct != null && instruct.isNotEmpty) ...[
+                                      const SizedBox(height: 6),
+                                      Text(instruct, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: MediSathiColors.brandBlue.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.schedule_rounded, size: 15, color: MediSathiColors.brandBlue),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      when,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12,
+                                        color: MediSathiColors.brandBlue,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: MediSathiColors.brandBlue.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Row(
+                          if (ad.$1.isNotEmpty || showMark) ...[
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
-                                Icon(Icons.schedule_rounded, size: 15, color: MediSathiColors.brandBlue),
-                                const SizedBox(width: 6),
-                                Text(
-                                  when,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 12,
-                                    color: MediSathiColors.brandBlue,
+                                if (ad.$1.isNotEmpty)
+                                  Text(
+                                    ad.$1,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 12,
+                                      color: ad.$2,
+                                    ),
                                   ),
-                                ),
+                                if (showMark)
+                                  TextButton(
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: MediSathiColors.brandBlue,
+                                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    onPressed: () => onMarkMedicineTaken(occId),
+                                    child: const Text('Mark taken', style: TextStyle(fontWeight: FontWeight.w700)),
+                                  ),
                               ],
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),

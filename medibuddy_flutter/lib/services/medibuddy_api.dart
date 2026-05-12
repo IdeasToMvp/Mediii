@@ -297,6 +297,18 @@ class MediBuddyApi {
     return (decoded['occurrences'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
+  Future<void> markMedicineDoseTaken(String occurrenceKey) async {
+    final uri = Uri.parse('$_base/api/medicine-occurrences/mark-taken');
+    final res = await http.post(
+      uri,
+      headers: {..._authHeaders, 'Content-Type': 'application/json'},
+      body: jsonEncode({'occurrence_key': occurrenceKey}),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw MediBuddyApiException(res.statusCode, res.body);
+    }
+  }
+
   Future<List<Map<String, dynamic>>> listMedicineSchedules() async {
     final uri = Uri.parse('$_base/api/medicine-schedules');
     final res = await http.get(uri, headers: _authHeaders);

@@ -7,7 +7,8 @@ import { createHash, randomUUID, timingSafeEqual } from "crypto";
 import path from "path";
 import OpenAI from "openai";
 import { analyzeMedicalDocumentImage } from "./openaiMedicalDocument.js";
-import { flattenUpcomingFromRows } from "./medicineExpansion.js";
+import { flattenUpcomingFromRows, findOccurrenceInSchedule } from "./medicineExpansion.js";
+import { enrichOccurrencesWithAdherence } from "./medicineAdherence.js";
 import { buildMedicineScheduleInserts, addDaysToIso } from "./medicineSynth.js";
 import { resolvePatientFamilyMember } from "./patientFamilyResolve.js";
 import {
@@ -1135,9 +1136,65 @@ app.get("/api/medicine-schedules/upcoming", requireUser, async (req, res) => {
       horizonDays: safeHorizon,
     }) ?? [];
 
+  let merged = upcoming;
+  try {
+    merged = await enrichOccurrencesWithAdherence(req.supabase, req.user.id, upcoming);
+  } catch (e) {
+    console.error("enrichOccurrencesWithAdherence", e);
+  }
+
   res.json({
     horizon_days: safeHorizon,
-    occurrences: upcoming,
+    occurrences: merged,
+  });
+});
+
+app.post("/api/medicine-occurrences/mark-taken", requireUser, async (req, res) => {
+  const occurrenceKey = typeof req.body?.occurrence_key === "string" ? req.body.occurrence_key.trim() : "";
+  if (!occurrenceKey) {
+    return res.status(400).json({ error: "occurrence_key is required" });
+  }
+
+  const scheduleIdMatch = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):/i.exec(occurrenceKey);
+  const scheduleId = scheduleIdMatch ? scheduleIdMatch[1] : null;
+  if (!scheduleId) {
+    return res.status(400).json({ error: "Invalid occurrence_key" });
+  }
+
+  const { data: sch, error: schErr } = await req.supabase
+    .from("medicine_schedules")
+    .select("*")
+    .eq("id", scheduleId)
+    .maybeSingle();
+  if (schErr) return res.status(400).json({ error: schErr.message });
+  if (!sch) return res.status(404).json({ error: "Schedule not found" });
+
+  const occ = findOccurrenceInSchedule(sch, occurrenceKey);
+  if (!occ) {
+    return res.status(400).json({ error: "Occurrence does not match this schedule" });
+  }
+
+  const row = {
+    user_id: req.user.id,
+    schedule_id: sch.id,
+    occurrence_key: occurrenceKey,
+    due_at_iso: occ.due_at_iso,
+    record_kind: "user_taken",
+    recorded_at: new Date().toISOString(),
+  };
+
+  const { error: upErr } = await req.supabase.from("medicine_dose_adherence").upsert(row, {
+    onConflict: "user_id,occurrence_key",
+  });
+  if (upErr) return res.status(400).json({ error: upErr.message });
+
+  res.json({
+    ok: true,
+    occurrence: {
+      ...occ,
+      adherence_status: "taken",
+      adherence_recorded_at: row.recorded_at,
+    },
   });
 });
 
