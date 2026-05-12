@@ -76,11 +76,8 @@ class _MediBuddyAppState extends State<MediBuddyApp> {
           child: child ?? const SizedBox.shrink(),
         );
       },
-      // Native: phone-width shell everywhere. Web: outer shell is full viewport so the marketing
-      // landing can use the full screen; [HomeShell] / [WelcomeWebFlow] sign-in constrain in-app UI to ~640px.
-      home: kIsWeb
-          ? appRoot
-          : AppTheme.constrainMobileWidth(maxWidth: 640, child: appRoot),
+      // Phone-width shell on all platforms (marketing site is separate).
+      home: AppTheme.constrainMobileWidth(maxWidth: 640, child: appRoot),
     );
   }
 }

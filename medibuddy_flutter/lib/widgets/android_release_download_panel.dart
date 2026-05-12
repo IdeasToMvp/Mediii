@@ -13,7 +13,7 @@ import 'app_release_download_launcher.dart';
 class AndroidReleaseDownloadPanel extends StatefulWidget {
   const AndroidReleaseDownloadPanel({super.key, this.sharedSnapshotFuture});
 
-  /// When set (e.g. from [LandingScreen]), reuses the same Android latest fetch as [LandingTopBuildDownloads].
+  /// Hero / marketing surfaces can pass a shared future for Android latest build metadata.
   final Future<AndroidLatestSnapshot>? sharedSnapshotFuture;
 
   static bool get offerApkHere {

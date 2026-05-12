@@ -17,7 +17,6 @@ import 'medicine_reminders_tab.dart';
 import 'add_prescription_manual_screen.dart';
 import 'dashboard_home_screen.dart';
 import 'edit_profile_screen.dart';
-import 'landing_screen.dart';
 import 'login_screen.dart';
 import 'profile_tab.dart';
 import 'upload_prescription_screen.dart';
@@ -32,11 +31,11 @@ class HomeShell extends StatelessWidget {
         stream: Supabase.instance.client.auth.onAuthStateChange,
         builder: (context, snapshot) {
           final session = Supabase.instance.client.auth.currentSession;
-          // Marketing landing (WelcomeWebFlow) is web-only; Android / iOS go straight to sign-in.
+          // Web and native: marketing lives on the separate Next.js site; app opens at sign-in.
           if (session == null) {
-            return kIsWeb ? const WelcomeWebFlow() : const LoginScreen();
+            return const LoginScreen();
           }
-          // Web: landing stays full viewport; authenticated app mirrors phone layout.
+          // Web: authenticated app mirrors phone layout.
           if (kIsWeb) {
             return AppTheme.constrainMobileWidth(
               maxWidth: 640,
