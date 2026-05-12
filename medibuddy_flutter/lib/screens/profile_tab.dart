@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../app_theme_scope.dart';
 import '../services/medibuddy_api.dart';
 import '../theme/medisathi_colors.dart';
 import '../widgets/plan_billing_sheet.dart';
@@ -56,24 +55,28 @@ class ProfileTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scope = AppThemeScope.maybeOf(context);
     final emailLine = userEmail ?? '';
     final birthYear = _parseBirthYear(profile?['birth_year']);
     final genderKey = (profile?['gender'] ?? '').toString().trim();
-    final genderLabel = genderKey.isEmpty ? null : (kGenderLabels[genderKey.toLowerCase()] ?? genderKey);
+    final genderLabel = genderKey.isEmpty
+        ? null
+        : (kGenderLabels[genderKey.toLowerCase()] ?? genderKey);
     final age = _approxAge(birthYear);
     final sublines = <String?>[
       if (age != null) 'Age ~$age',
       genderLabel,
     ].whereType<String>().toList();
 
-    final planName = plan is Map ? (plan!['display_name']?.toString() ?? '').trim() : '';
-    final famSlots = plan is Map ? plan!['family_slots_used']?.toString() ?? '—' : '—';
-    final famCap =
-        plan is Map ?
-          plan!['max_family_members'] == null ?
-              '∞'
-          : '${plan!['max_family_members']}'
+    final planName = plan is Map
+        ? (plan!['display_name']?.toString() ?? '').trim()
+        : '';
+    final famSlots = plan is Map
+        ? plan!['family_slots_used']?.toString() ?? '—'
+        : '—';
+    final famCap = plan is Map
+        ? plan!['max_family_members'] == null
+              ? '∞'
+              : '${plan!['max_family_members']}'
         : '—';
 
     return ColoredBox(
@@ -90,13 +93,15 @@ class ProfileTab extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 44,
-                    backgroundColor: MediSathiColors.brandBlue.withValues(alpha: 0.2),
+                    backgroundColor: MediSathiColors.brandBlue.withValues(
+                      alpha: 0.2,
+                    ),
                     child: Text(
                       _initials(displayName),
                       style: theme.textTheme.headlineSmall?.copyWith(
-                            color: MediSathiColors.brandBlue,
-                            fontWeight: FontWeight.w800,
-                          ),
+                        color: MediSathiColors.brandBlue,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                   Positioned(
@@ -110,7 +115,11 @@ class ProfileTab extends StatelessWidget {
                         onTap: onEditAccount,
                         child: const Padding(
                           padding: EdgeInsets.all(6),
-                          child: Icon(Icons.edit_rounded, color: Colors.white, size: 18),
+                          child: Icon(
+                            Icons.edit_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
                         ),
                       ),
                     ),
@@ -124,16 +133,25 @@ class ProfileTab extends StatelessWidget {
                   children: [
                     Text(
                       displayName,
-                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     if (emailLine.isNotEmpty)
-                      Text(emailLine, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                      Text(
+                        emailLine,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                     if (sublines.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Text(
                         sublines.join(' · '),
-                        style: theme.textTheme.bodySmall?.copyWith(color: Colors.black54),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.black54,
+                        ),
                       ),
                     ],
                   ],
@@ -162,7 +180,8 @@ class ProfileTab extends StatelessWidget {
                   iconColor: const Color(0xFF0369A1),
                   title: 'Subscription & plan',
                   subtitle: planName.isEmpty ? 'Free' : planName,
-                  onTap: () => _showPlanSheet(context, planName, famSlots, famCap),
+                  onTap: () =>
+                      _showPlanSheet(context, planName, famSlots, famCap),
                 ),
                 const Divider(height: 1),
                 _SettingsRow(
@@ -170,7 +189,8 @@ class ProfileTab extends StatelessWidget {
                   iconBg: const Color(0xFFCCFBF1),
                   iconColor: const Color(0xFF0D9488),
                   title: 'Privacy & security',
-                  onTap: () => _snack(context, 'Privacy controls are coming soon.'),
+                  onTap: () =>
+                      _snack(context, 'Privacy controls are coming soon.'),
                 ),
                 const Divider(height: 1),
                 _SettingsRow(
@@ -178,7 +198,10 @@ class ProfileTab extends StatelessWidget {
                   iconBg: const Color(0xFFFFEDD5),
                   iconColor: const Color(0xFFEA580C),
                   title: 'Export records',
-                  onTap: () => _snack(context, 'Export will be available in a future update.'),
+                  onTap: () => _snack(
+                    context,
+                    'Export will be available in a future update.',
+                  ),
                 ),
               ],
             ),
@@ -190,22 +213,12 @@ class ProfileTab extends StatelessWidget {
             child: Column(
               children: [
                 _SettingsRow(
-                  icon: Icons.dark_mode_outlined,
-                  iconBg: const Color(0xFF1E3A5F),
-                  iconColor: Colors.white,
-                  title: 'Dark mode',
-                  trailing: Switch.adaptive(
-                    value: scope?.darkMode ?? false,
-                    onChanged: scope == null ? null : (v) => scope.onDarkModeChanged(v),
-                  ),
-                ),
-                const Divider(height: 1),
-                _SettingsRow(
                   icon: Icons.notifications_outlined,
                   iconBg: MediSathiColors.brandBlue.withValues(alpha: 0.12),
                   iconColor: MediSathiColors.brandBlue,
                   title: 'Notifications',
-                  onTap: () => _snack(context, 'Notification preferences coming soon.'),
+                  onTap: () =>
+                      _snack(context, 'Notification preferences coming soon.'),
                 ),
                 const Divider(height: 1),
                 _SettingsRow(
@@ -213,7 +226,10 @@ class ProfileTab extends StatelessWidget {
                   iconBg: const Color(0xFFE5E7EB),
                   iconColor: const Color(0xFF374151),
                   title: 'Help & support',
-                  onTap: () => _snack(context, 'Support: reach out from your care portal or clinic contact.'),
+                  onTap: () => _snack(
+                    context,
+                    'Support: reach out from your care portal or clinic contact.',
+                  ),
                 ),
                 const Divider(height: 1),
                 _SettingsRow(
@@ -234,15 +250,18 @@ class ProfileTab extends StatelessWidget {
                 Text(
                   'MEDISATHI $versionLabel'.toUpperCase(),
                   style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        letterSpacing: 0.8,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: theme.colorScheme.onSurfaceVariant,
+                    letterSpacing: 0.8,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   'Institutional trust & security verified',
-                  style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline, fontSize: 11),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.outline,
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
@@ -262,8 +281,12 @@ class ProfileTab extends StatelessWidget {
     String famSlots,
     String famCap,
   ) {
-    final accessRaw = plan is Map ? plan!['pro_access_until']?.toString().trim() : null;
-    final proAccessUntil = (accessRaw != null && accessRaw.isNotEmpty) ? accessRaw : null;
+    final accessRaw = plan is Map
+        ? plan!['pro_access_until']?.toString().trim()
+        : null;
+    final proAccessUntil = (accessRaw != null && accessRaw.isNotEmpty)
+        ? accessRaw
+        : null;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -281,15 +304,26 @@ class ProfileTab extends StatelessWidget {
     );
   }
 
-  Future<void> _confirmLogout(BuildContext context, VoidCallback onSignOut) async {
+  Future<void> _confirmLogout(
+    BuildContext context,
+    VoidCallback onSignOut,
+  ) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Log out?'),
-        content: const Text('You will need to sign in again to view records and reminders.'),
+        content: const Text(
+          'You will need to sign in again to view records and reminders.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Log out')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Log out'),
+          ),
         ],
       ),
     );
@@ -309,10 +343,10 @@ class _SectionHeading extends StatelessWidget {
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Colors.black45,
-              letterSpacing: 1.2,
-              fontWeight: FontWeight.w700,
-            ),
+          color: Colors.black45,
+          letterSpacing: 1.2,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -345,7 +379,6 @@ class _SettingsRow extends StatelessWidget {
     required this.iconColor,
     required this.title,
     this.subtitle,
-    this.trailing,
     this.onTap,
     this.titleColor,
   });
@@ -355,7 +388,6 @@ class _SettingsRow extends StatelessWidget {
   final Color iconColor;
   final String title;
   final String? subtitle;
-  final Widget? trailing;
   final VoidCallback? onTap;
   final Color? titleColor;
 
@@ -368,7 +400,10 @@ class _SettingsRow extends StatelessWidget {
           Container(
             width: 40,
             height: 40,
-            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(
+              color: iconBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
             child: Icon(icon, color: iconColor, size: 22),
           ),
           const SizedBox(width: 14),
@@ -376,18 +411,28 @@ class _SettingsRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: TextStyle(fontWeight: FontWeight.w600, color: titleColor)),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: titleColor,
+                  ),
+                ),
                 if (subtitle != null && subtitle!.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
-                    child: Text(subtitle!, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                    child: Text(
+                      subtitle!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
                   ),
               ],
             ),
           ),
-          if (trailing != null)
-            trailing!
-          else if (onTap != null)
+          if (onTap != null)
             Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
         ],
       ),

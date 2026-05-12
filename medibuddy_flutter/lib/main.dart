@@ -1,9 +1,7 @@
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'app_theme_scope.dart';
 import 'config/app_config.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_bootstrap.dart';
@@ -66,38 +64,12 @@ class MediBuddyApp extends StatefulWidget {
 }
 
 class _MediBuddyAppState extends State<MediBuddyApp> {
-  ThemeMode _themeMode = ThemeMode.light;
-
-  @override
-  void initState() {
-    super.initState();
-    SharedPreferences.getInstance().then((p) {
-      if (!mounted) return;
-      if (p.getBool('pref_dark_mode') == true) {
-        setState(() => _themeMode = ThemeMode.dark);
-      }
-    });
-  }
-
-  void _setDarkMode(bool dark) {
-    setState(() => _themeMode = dark ? ThemeMode.dark : ThemeMode.light);
-    SharedPreferences.getInstance().then(
-      (p) => p.setBool('pref_dark_mode', dark),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final appRoot = AppThemeScope(
-      darkMode: _themeMode == ThemeMode.dark,
-      onDarkModeChanged: _setDarkMode,
-      child: const AppBootstrap(),
-    );
+    const appRoot = AppBootstrap();
     return MaterialApp(
       title: 'MediSathi',
       theme: AppTheme.mobileFirst(),
-      darkTheme: AppTheme.mobileFirstDark(),
-      themeMode: _themeMode,
       builder: (context, child) {
         return MediaQuery(
           data: _nonNegativeViewInsets(MediaQuery.of(context)),

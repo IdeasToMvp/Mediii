@@ -5,7 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
-import '../platform/razorpay_web_checkout.dart' show openRazorpaySubscriptionCheckoutWeb;
+import '../platform/razorpay_web_checkout.dart'
+    show openRazorpaySubscriptionCheckoutWeb;
 import '../services/medibuddy_api.dart';
 import '../theme/medisathi_colors.dart';
 
@@ -28,6 +29,7 @@ class PlanBillingSheet extends StatefulWidget {
   final String famCap;
   final MediBuddyApi api;
   final String currentPlanSlug;
+
   /// From `/api/me` → `plan.pro_access_until` (ISO-8601). Current period end / prepaid access end.
   final String? proAccessUntilIso;
   final String? userEmail;
@@ -40,6 +42,7 @@ class PlanBillingSheet extends StatefulWidget {
 class _PlanBillingSheetState extends State<PlanBillingSheet> {
   Razorpay? _rzp;
   bool _busy = false;
+
   /// From create-subscription; used after native Checkout success to call sync endpoint.
   String? _pendingSubscriptionId;
 
@@ -80,7 +83,9 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
     try {
       await widget.api.syncRazorpaySubscription(subscriptionId: subscriptionId);
     } on MediBuddyApiException catch (e) {
-      _snack('Could not sync plan yet: ${_readableApiError(e)} Try pull-to-refresh on Profile.');
+      _snack(
+        'Could not sync plan yet: ${_readableApiError(e)} Try pull-to-refresh on Profile.',
+      );
     }
   }
 
@@ -113,7 +118,9 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
           await widget.onPurchased();
           if (!mounted) return;
           Navigator.of(context).maybePop();
-          _snack('You are on Pro (synced). Pull to refresh if something still looks off.');
+          _snack(
+            'You are on Pro (synced). Pull to refresh if something still looks off.',
+          );
           return;
         }
         if (webErr == 'dismissed') {
@@ -129,7 +136,8 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
         'name': 'MediSathi',
         'description': 'Pro subscription',
         'prefill': {
-          if (widget.userEmail != null && widget.userEmail!.trim().isNotEmpty) 'email': widget.userEmail!.trim(),
+          if (widget.userEmail != null && widget.userEmail!.trim().isNotEmpty)
+            'email': widget.userEmail!.trim(),
         },
       });
     } on MediBuddyApiException catch (e) {
@@ -172,9 +180,12 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
     final accessEnd = _parseAccessIso(widget.proAccessUntilIso);
     final dateFormat = DateFormat.yMMMEd();
     final famUsed = int.tryParse(widget.famSlots.trim());
-    final famCapNum = widget.famCap.trim() == '∞' ? null : int.tryParse(widget.famCap.trim());
-    final famProgress =
-        (famUsed != null && famCapNum != null && famCapNum > 0) ? (famUsed / famCapNum).clamp(0.0, 1.0) : null;
+    final famCapNum = widget.famCap.trim() == '∞'
+        ? null
+        : int.tryParse(widget.famCap.trim());
+    final famProgress = (famUsed != null && famCapNum != null && famCapNum > 0)
+        ? (famUsed / famCapNum).clamp(0.0, 1.0)
+        : null;
 
     return SingleChildScrollView(
       child: Padding(
@@ -189,23 +200,31 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    gradient: onPro ?
-                        LinearGradient(
-                          colors: [
-                            MediSathiColors.brandBlue.withValues(alpha: 0.2),
-                            const Color(0xFF0369A1).withValues(alpha: 0.18),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        )
-                    : null,
+                    gradient: onPro
+                        ? LinearGradient(
+                            colors: [
+                              MediSathiColors.brandBlue.withValues(alpha: 0.2),
+                              const Color(0xFF0369A1).withValues(alpha: 0.18),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
                     color: onPro ? null : cs.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: onPro ? MediSathiColors.brandBlue.withValues(alpha: 0.25) : cs.outlineVariant),
+                    border: Border.all(
+                      color: onPro
+                          ? MediSathiColors.brandBlue.withValues(alpha: 0.25)
+                          : cs.outlineVariant,
+                    ),
                   ),
                   child: Icon(
-                    onPro ? Icons.workspace_premium_rounded : Icons.person_outline_rounded,
-                    color: onPro ? const Color(0xFF0369A1) : cs.onSurfaceVariant,
+                    onPro
+                        ? Icons.workspace_premium_rounded
+                        : Icons.person_outline_rounded,
+                    color: onPro
+                        ? const Color(0xFF0369A1)
+                        : cs.onSurfaceVariant,
                     size: 28,
                   ),
                 ),
@@ -216,12 +235,19 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
                     children: [
                       Text(
                         'Your plan',
-                        style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
+                        ),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        onPro ? 'Premium · more room for your family' : 'See what you get on Pro',
-                        style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                        onPro
+                            ? 'Premium · more room for your family'
+                            : 'See what you get on Pro',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -232,19 +258,21 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
             DecoratedBox(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20),
-                gradient: onPro ?
-                    LinearGradient(
-                      colors: [
-                        const Color(0xFF0C4A6E).withValues(alpha: 0.06),
-                        MediSathiColors.brandBlue.withValues(alpha: 0.08),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    )
-                : null,
+                gradient: onPro
+                    ? LinearGradient(
+                        colors: [
+                          const Color(0xFF0C4A6E).withValues(alpha: 0.06),
+                          MediSathiColors.brandBlue.withValues(alpha: 0.08),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
                 color: onPro ? null : cs.surfaceContainerLow,
                 border: Border.all(
-                  color: onPro ? MediSathiColors.brandBlue.withValues(alpha: 0.22) : cs.outlineVariant.withValues(alpha: 0.6),
+                  color: onPro
+                      ? MediSathiColors.brandBlue.withValues(alpha: 0.22)
+                      : cs.outlineVariant.withValues(alpha: 0.6),
                 ),
               ),
               child: Padding(
@@ -255,29 +283,43 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
-                            color: onPro ? const Color(0xFF0369A1) : cs.onSurfaceVariant.withValues(alpha: 0.2),
+                            color: onPro
+                                ? const Color(0xFF0369A1)
+                                : cs.onSurfaceVariant.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
                             onPro ? 'PRO' : 'FREE',
                             style: theme.textTheme.labelMedium?.copyWith(
-                                  color: onPro ? Colors.white : cs.onSurfaceVariant,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.6,
-                                ),
+                              color: onPro ? Colors.white : cs.onSurfaceVariant,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.6,
+                            ),
                           ),
                         ),
                         const Spacer(),
                         if (onPro)
-                          Icon(Icons.verified_rounded, color: MediSathiColors.brandBlue.withValues(alpha: 0.85), size: 22),
+                          Icon(
+                            Icons.verified_rounded,
+                            color: MediSathiColors.brandBlue.withValues(
+                              alpha: 0.85,
+                            ),
+                            size: 22,
+                          ),
                       ],
                     ),
                     const SizedBox(height: 12),
                     Text(
                       widget.planLabel.isEmpty ? 'Free' : widget.planLabel,
-                      style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, height: 1.15),
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        height: 1.15,
+                      ),
                     ),
                     if (onPro) ...[
                       const SizedBox(height: 14),
@@ -286,7 +328,8 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
                           icon: Icons.event_available_rounded,
                           label: 'Paid through',
                           value: dateFormat.format(accessEnd.toLocal()),
-                          sub: 'End of your current billing period. Renews unless you cancel.',
+                          sub:
+                              'End of your current billing period. Renews unless you cancel.',
                           emphasisColor: const Color(0xFF0369A1),
                         )
                       else
@@ -299,12 +342,19 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.info_outline_rounded, size: 20, color: cs.primary),
+                              Icon(
+                                Icons.info_outline_rounded,
+                                size: 20,
+                                color: cs.primary,
+                              ),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
                                   'Billing period date appears after checkout or sync. Pull down on this screen to refresh.',
-                                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.35),
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: cs.onSurfaceVariant,
+                                    height: 1.35,
+                                  ),
                                 ),
                               ),
                             ],
@@ -316,16 +366,30 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
               ),
             ),
             const SizedBox(height: 18),
-            Text('Included with your plan', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            Text(
+              'Included with your plan',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 10),
-            _FeatureLine(icon: Icons.groups_outlined, text: 'Household profiles — Free: 2 · Pro: up to 10'),
+            _FeatureLine(
+              icon: Icons.groups_outlined,
+              text: 'Household profiles — Free: 2 · Pro: up to 10',
+            ),
             const SizedBox(height: 8),
             _FeatureLine(
               icon: Icons.picture_as_pdf_outlined,
-              text: 'PDF uploads, batch scans, higher AI allowance (enforced on the server)',
+              text:
+                  'PDF uploads, batch scans, higher AI allowance (enforced on the server)',
             ),
             const SizedBox(height: 18),
-            Text('Usage', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            Text(
+              'Usage',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -339,11 +403,19 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text('Household profiles', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                        child: Text(
+                          'Household profiles',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                       Text(
                         '${widget.famSlots} / ${widget.famCap}',
-                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800, color: cs.primary),
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: cs.primary,
+                        ),
                       ),
                     ],
                   ),
@@ -354,7 +426,9 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
                       child: LinearProgressIndicator(
                         value: famProgress,
                         minHeight: 6,
-                        backgroundColor: cs.outlineVariant.withValues(alpha: 0.35),
+                        backgroundColor: cs.outlineVariant.withValues(
+                          alpha: 0.35,
+                        ),
                         color: MediSathiColors.brandBlue,
                       ),
                     ),
@@ -363,33 +437,70 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
               ),
             ),
             const SizedBox(height: 22),
+            Text(
+              onPro ? 'Manage or upgrade your Pro plan' : 'Upgrade to Pro',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
             if (!onPro) ...[
-              Text('Upgrade to Pro', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 10),
               FilledButton(
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   backgroundColor: MediSathiColors.brandBlue,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
                 onPressed: _busy ? null : () => _checkoutPro('monthly'),
-                child: const Text('Pro — billed monthly'),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Pro — Monthly'),
+                    const SizedBox(height: 2),
+                    Text(
+                      '₹99 / month',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.92),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 10),
-              FilledButton.tonal(
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ],
+            FilledButton.tonal(
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                onPressed: _busy ? null : () => _checkoutPro('annual'),
-                child: const Text('Pro — billed yearly (save vs monthly)'),
               ),
-              const SizedBox(height: 12),
-              Text(
-                kIsWeb ? 'Razorpay loads scripts when checkout opens — normal with test keys.' : 'Secured by Razorpay Checkout.',
-                style: theme.textTheme.bodySmall?.copyWith(color: cs.outline),
+              onPressed: _busy ? null : () => _checkoutPro('annual'),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Pro — Yearly'),
+                  const SizedBox(height: 2),
+                  Text(
+                    '₹990 / year',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-            ] else
+            ),
+            const SizedBox(height: 12),
+            Text(
+              kIsWeb
+                  ? 'Razorpay loads scripts when checkout opens — normal with test keys.'
+                  : 'Secured by Razorpay Checkout.',
+              style: theme.textTheme.bodySmall?.copyWith(color: cs.outline),
+            ),
+            if (onPro) ...[
+              const SizedBox(height: 14),
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
@@ -399,18 +510,29 @@ class _PlanBillingSheetState extends State<PlanBillingSheet> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.receipt_long_outlined, size: 22, color: cs.onSurfaceVariant),
+                    Icon(
+                      Icons.receipt_long_outlined,
+                      size: 22,
+                      color: cs.onSurfaceVariant,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         'Manage or cancel from your Razorpay receipts and emails, or contact support — you keep Pro until the paid-through date above.',
-                        style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.4),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                          height: 1.4,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-            if (_busy) ...[const SizedBox(height: 20), const Center(child: CircularProgressIndicator(strokeWidth: 2.3))],
+            ],
+            if (_busy) ...[
+              const SizedBox(height: 20),
+              const Center(child: CircularProgressIndicator(strokeWidth: 2.3)),
+            ],
           ],
         ),
       ),
@@ -438,9 +560,21 @@ class _FeatureLine extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 20, color: MediSathiColors.brandBlue.withValues(alpha: 0.9)),
+        Icon(
+          icon,
+          size: 20,
+          color: MediSathiColors.brandBlue.withValues(alpha: 0.9),
+        ),
         const SizedBox(width: 10),
-        Expanded(child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.4))),
+        Expanded(
+          child: Text(
+            text,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              height: 1.4,
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -480,7 +614,10 @@ class _AccessDateRow extends StatelessWidget {
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: emphasisColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(
+                  color: emphasisColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 child: Icon(icon, size: 22, color: emphasisColor),
               ),
               const SizedBox(width: 12),
@@ -491,18 +628,18 @@ class _AccessDateRow extends StatelessWidget {
                     Text(
                       label.toUpperCase(),
                       style: theme.textTheme.labelSmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.8,
-                          ),
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       value,
                       style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: cs.onSurface,
-                          ),
+                        fontWeight: FontWeight.w800,
+                        color: cs.onSurface,
+                      ),
                     ),
                   ],
                 ),
@@ -510,7 +647,13 @@ class _AccessDateRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          Text(sub, style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.35)),
+          Text(
+            sub,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              height: 1.35,
+            ),
+          ),
         ],
       ),
     );
